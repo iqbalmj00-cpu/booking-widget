@@ -1,0 +1,110 @@
+/* ── SYJ Booking Widget — Global Styles ─────────────────────────────── */
+/* All classes prefixed with syj- to avoid conflicts with host page     */
+
+:host, .syj-widget-root {
+    /* Brand defaults — overridable via runtime config CSS vars */
+    --brand: #F97316;
+    --brand-hover: #EA580C;
+    --foreground: #0F172A;
+    --background: #FFFFFF;
+    --card: #F8FAFC;
+    --border: #E2E8F0;
+    --muted: #64748B;
+
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ── Resets inside widget ── */
+.syj-widget-root *, .syj-widget-root *::before, .syj-widget-root *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Fade-up animation ── */
+@keyframes syj-fade-up {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up {
+    animation: syj-fade-up 0.35s ease-out both;
+}
+
+/* ── Form elements ── */
+.label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 6px;
+}
+
+.input, .select {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--foreground);
+    background: var(--background);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input:focus, .select:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+}
+.input::placeholder {
+    color: var(--muted);
+}
+
+.select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2364748b' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 12px center;
+    background-repeat: no-repeat;
+    background-size: 16px;
+    padding-right: 36px;
+}
+
+/* ── Google Maps autocomplete dropdown z-index ── */
+.pac-container {
+    z-index: 2147483647 !important;
+}
+
+/* ── Scrollbar styling ── */
+.syj-widget-root ::-webkit-scrollbar {
+    width: 6px;
+}
+.syj-widget-root ::-webkit-scrollbar-track {
+    background: transparent;
+}
+.syj-widget-root ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+
+/* ── Stripe card element container ── */
+.syj-stripe-card {
+    padding: 12px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    background: var(--background);
+    transition: border-color 0.2s;
+}
+.syj-stripe-card:focus-within {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
+}
+
+/* ── Responsive adjustments ── */
+@media (max-width: 480px) {
+    .syj-widget-root {
+        font-size: 14px;
+    }
+}
