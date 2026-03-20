@@ -53,8 +53,8 @@ export const widgetApi = {
     },
 
     /** Create Stripe SetupIntent for card-on-file */
-    createSetupIntent: (customerId: string, opts: RequestOptions) =>
-        apiPost("/api/booking/setup-card", { customerId }, opts),
+    createSetupIntent: (opts: RequestOptions) =>
+        apiPost("/api/booking/setup-card", {}, opts),
 
     /** Validate a promo code */
     validatePromo: (code: string, opts: RequestOptions) =>

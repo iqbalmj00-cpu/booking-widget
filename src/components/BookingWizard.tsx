@@ -261,13 +261,13 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         return price;
     };
 
-    // 1. Create SetupIntent when entering quote phase AND we have a customerId from lead capture
+    // 1. Create SetupIntent when entering quote phase (independent of payment preference)
     useEffect(() => {
-        if (!hasStripe || currentPhase !== "quote" || setupClientSecret || !storedCustomerId) return;
+        if (!hasStripe || currentPhase !== "quote" || setupClientSecret) return;
         let cancelled = false;
         (async () => {
             try {
-                const data = await widgetApi.createSetupIntent(storedCustomerId, apiOpts);
+                const data = await widgetApi.createSetupIntent(apiOpts);
                 if (cancelled || !data.clientSecret) return;
                 setSetupClientSecret(data.clientSecret);
                 if (data.connectedAccountId) setConnectedAccountId(data.connectedAccountId);
@@ -276,7 +276,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             }
         })();
         return () => { cancelled = true; };
-    }, [currentPhase, hasStripe, setupClientSecret, storedCustomerId]);
+    }, [currentPhase, hasStripe, setupClientSecret]);
 
     // 2. Mount card element ONLY when Pay Online selected + SetupIntent ready + mount ref available
     useEffect(() => {
