@@ -52,6 +52,10 @@ export const widgetApi = {
         return apiGet("/api/booking/container-availability", qs, opts);
     },
 
+    /** Get dynamic time slots with capacity for a specific date */
+    getAvailableSlots: (date: string, opts: RequestOptions) =>
+        apiGet("/api/public/available-slots", { date }, opts),
+
     /** Create Stripe SetupIntent for card-on-file */
     createSetupIntent: (opts: RequestOptions) =>
         apiPost("/api/booking/setup-card", {}, opts),

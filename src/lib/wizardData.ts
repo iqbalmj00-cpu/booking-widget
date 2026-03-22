@@ -14,6 +14,30 @@ export type VolumeOption = { id: string; label: string; fraction: string; desc: 
 export type LocationOption = { id: string; label: string; icon: string; desc: string };
 export type TimeSlot = { id: string; label: string; period: string; startHour: number };
 
+/** Slot shape returned by GET /api/public/available-slots */
+export type DynamicSlot = {
+    start: string;          // "08:00"
+    end: string;            // "10:00"
+    label: string;          // "Morning"
+    available: boolean;
+    remainingCapacity: number;
+};
+
+/** Format a 24h time string like "08:00" → "8:00 AM" */
+export function formatSlotTime(time: string | null): string {
+    if (!time) return "";
+    // Handle range format "08:00-10:00"
+    if (time.includes("-")) {
+        const [start, end] = time.split("-");
+        return `${formatSlotTime(start)} – ${formatSlotTime(end)}`;
+    }
+    const [h, m] = time.split(":").map(Number);
+    if (isNaN(h)) return time;
+    const period = h >= 12 ? "PM" : "AM";
+    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return m === 0 ? `${hour12}:00 ${period}` : `${hour12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
 export const JUNK_CATEGORIES: JunkCategory[] = [
     { id: "furniture", label: "Furniture Removal", icon: "Armchair", desc: "Sofas, tables, chairs, dressers", inputType: "quantity" },
     { id: "appliances", label: "Appliance Disposal", icon: "Plug", desc: "Fridges, washers, dryers, ovens", inputType: "quantity" },
