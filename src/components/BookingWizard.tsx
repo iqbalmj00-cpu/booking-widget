@@ -666,7 +666,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     const toggleEdge = (id: string) =>
         setEdgeCases(prev => ({ ...prev, [id]: !prev[id] }));
 
-    const hasEdgeCase = Object.values(edgeCases).some(Boolean);
+    const isOnSiteEstimate = !!edgeCases["unknown"];
+    const hasSpecialConditions = Object.values(edgeCases).some(Boolean);
 
     /* ── Sync tierIndex → volume ── */
     useEffect(() => { setVolume(LOAD_TIERS[tierIndex].volumeId); }, [tierIndex]);
@@ -756,21 +757,21 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             const sendJunkBooking = async () => {
                 const loadTier = LOAD_TIERS[tierIndex];
                 const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
-                const description = hasEdgeCase
-                    ? `${loadTier.title} — custom estimate (${edgeCaseIds.join(", ")})`
-                    : `${loadTier.title} junk removal`;
+                const description = isOnSiteEstimate
+                    ? `${loadTier.title} — on-site estimate (${edgeCaseIds.join(", ")})`
+                    : `${loadTier.title} junk removal${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`;
                 const volumeOption = VOLUME_OPTIONS.find(v => v.id === volume);
                 const locationOption = LOCATION_OPTIONS.find(l => l.id === location);
                 const minPrice = tierData ? roundTo5(tierData.min + totalAdj) : 0;
                 const maxPrice = tierData ? roundTo5(tierData.max + totalAdj) : 0;
-                const quoteRangeStr = hasEdgeCase ? "On-Site Estimate" : (tierData ? `$${minPrice} – $${maxPrice}` : "");
+                const quoteRangeStr = isOnSiteEstimate ? "On-Site Estimate" : (tierData ? `$${minPrice} – $${maxPrice}` : "");
                 const stairsAccessLabel = locationOption?.label || "Ground Floor";
 
                 const payload: Record<string, unknown> = {
                     type: "booking", status: "booked", serviceType: "junk_removal",
                     name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
-                    value: hasEdgeCase ? undefined : (minPrice || undefined), notes: contact.notes || "",
+                    value: isOnSiteEstimate ? undefined : (minPrice || undefined), notes: contact.notes || "",
                     metadata: {
                         serviceType: "junk_removal",
                         customerType: contact.customerType,
@@ -779,8 +780,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                         loadTier: loadTier.title,
                         junkLocation: locationOption?.label || "", stairsAccess: stairsAccessLabel,
                         specialConditions: edgeCaseIds,
-                        edgeCaseNote: hasEdgeCase ? "Customer flagged special conditions — crew estimates on-site" : "",
-                        priceRange: hasEdgeCase ? null : (tierData ? [minPrice, maxPrice] : null),
+                        edgeCaseNote: isOnSiteEstimate ? "On-site estimate — customer unsure of load" : (hasSpecialConditions ? `Flagged: ${edgeCaseIds.join(", ")}` : ""),
+                        priceRange: isOnSiteEstimate ? null : (tierData ? [minPrice, maxPrice] : null),
                         surcharges: [
                             ...(priceAdj > 0 ? [{ id: "stairs", label: stairsSurcharge?.label, amount: priceAdj }] : []),
                             ...(distanceSurcharge > 0 ? [{ id: "distance", label: "Distance surcharge", amount: distanceSurcharge }] : []),
@@ -1195,7 +1196,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                     <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>{LOAD_TIERS[tierIndex].desc}</p>
                                 </div>
                                 <div style={{ flexShrink: 0, textAlign: "right" }}>
-                                    {hasEdgeCase ? (
+                                    {isOnSiteEstimate ? (
                                         <div style={{ background: "rgba(var(--foreground-rgb, 0,0,0),0.04)", borderRadius: 10, padding: "8px 12px" }}>
                                             <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.3, whiteSpace: "nowrap" }}>Free On-Site</div>
                                             <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)" }}>Estimate</div>
@@ -1245,7 +1246,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                     <EdgeToggle item={item} checked={!!edgeCases[item.id]} onChange={() => toggleEdge(item.id)} />
                                 </div>
                             ))}
-                            {hasEdgeCase && (
+                            {isOnSiteEstimate && (
                                 <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFFBEB", borderRadius: 10, border: "1px solid #FDE68A", display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#92400E", lineHeight: 1.5 }}>
                                     <span style={{ fontSize: 16, lineHeight: "20px", flexShrink: 0 }}>⚠️</span>
                                     <span><strong>No worries.</strong> We&apos;ll send a crew to give you a free, no-obligation estimate on-site before any work begins.</span>
@@ -1715,7 +1716,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                     if (serviceType === "junk" || serviceType === "both") {
                                         rows.push(
                                             { label: "Load Size", value: `${LOAD_TIERS[tierIndex].label} — ${LOAD_TIERS[tierIndex].title}` },
-                                            ...(hasEdgeCase ? [{ label: "Conditions", value: EDGE_CASES.filter(ec => edgeCases[ec.id]).map(ec => ec.label).join(", ") }] : []),
+                                            ...(hasSpecialConditions ? [{ label: "Conditions", value: EDGE_CASES.filter(ec => edgeCases[ec.id]).map(ec => ec.label).join(", ") }] : []),
                                             { label: "Truck Load", value: tierData?.label || "—" },
                                             { label: "Location", value: LOCATION_OPTIONS.find(l => l.id === location)?.label || "—" },
                                         );
