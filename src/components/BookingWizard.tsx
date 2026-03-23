@@ -1,14 +1,15 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { Check, ChevronLeft, ArrowRight, CreditCard, Lock, Trash2, ClipboardList, Truck, MapPin, CalendarDays, BarChart3, AlertTriangle, LockKeyhole, Hand, Wrench, Box, FileText, PenTool, Home, Building2 } from "lucide-react";
+import { Check, ChevronLeft, ArrowRight, CreditCard, Lock, Truck, MapPin, CalendarDays, AlertTriangle, LockKeyhole, Hand, Wrench, Box, FileText, PenTool, Home, Building2 } from "lucide-react";
 import ServiceIcon from "./ServiceIcon";
 import AddressAutocomplete from "./AddressAutocomplete";
 import { haversineDistance } from "../lib/haversine";
 import { useConfig, formatDumpsterPrice, roundTo5 } from "../lib/config";
 import { widgetApi } from "../lib/api";
 import {
-    JUNK_CATEGORIES, CATEGORY_ITEMS, VOLUME_OPTIONS,
-    LOCATION_OPTIONS, TIME_SLOTS, PILE_SIZES,
+    VOLUME_OPTIONS,
+    LOCATION_OPTIONS, TIME_SLOTS,
     CONTAINER_SIZES, DEBRIS_TYPES, RENTAL_DURATIONS,
+    LOAD_TIERS, EDGE_CASES,
     getPhases, getPhaseLabel, isDayClosed, getAvailableTimeSlots,
     formatSlotTime,
     type ServiceType, type WizardPhase, type DynamicSlot,
@@ -21,32 +22,332 @@ export type BookingCompleteData = {
     debrisType?: string; rentalDuration?: string; autoBooked?: boolean;
 };
 
-/* ── Types ─────────────────────────────────────────────────────────────── */
-type ItemQtyMap = Record<string, Record<string, number>>;
+/* ── Types ───────────────────────────────────────────────────────────────────── */
 type ContactInfo = { name: string; phone: string; email: string; address: string; notes: string; customerType: "residential" | "commercial" };
 
 /* ── Stripe (loaded lazily when configured) ── */
 // hasStripe determined at runtime via config context (see component body)
 
-/* ── Truck SVG ─────────────────────────────────────────────────────────── */
-function TruckVisual({ fillPercent }: { fillPercent: number }) {
-    const fill = Math.min(fillPercent, 1.0);
+/* ── V2: Animated Price Counter ──────────────────────────────────────── */
+function AnimatedPrice({ value, fontSize = 28 }: { value: number; fontSize?: number }) {
+    const [display, setDisplay] = useState(value);
+    const rafRef = useRef<number | null>(null);
+    const fromRef = useRef(value);
+    useEffect(() => {
+        if (fromRef.current === value) return;
+        const from = fromRef.current;
+        const to = value;
+        const duration = 300;
+        const start = performance.now();
+        const tick = (now: number) => {
+            const t = Math.min((now - start) / duration, 1);
+            const eased = 1 - Math.pow(1 - t, 3);
+            setDisplay(Math.round(from + (to - from) * eased));
+            if (t < 1) rafRef.current = requestAnimationFrame(tick);
+        };
+        rafRef.current = requestAnimationFrame(tick);
+        fromRef.current = value;
+        return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+    }, [value]);
     return (
-        <svg viewBox="0 0 320 140" style={{ width: "100%", maxWidth: 340 }}>
-            <rect x="10" y="30" width="200" height="80" rx="4" fill="var(--foreground)" stroke="#334155" strokeWidth="2" />
-            <rect x="12" y={30 + 78 * (1 - fill)} width="196" height={78 * fill} rx="2" fill="var(--brand)" opacity="0.9" style={{ transition: "all 0.4s ease" }} />
-            {[0.25, 0.5, 0.75].map((line) => (
-                <line key={line} x1="12" y1={30 + 78 * (1 - line)} x2="208" y2={30 + 78 * (1 - line)} stroke="#475569" strokeWidth="1" strokeDasharray="4 3" />
+        <span style={{
+            fontFamily: "var(--heading-font)", fontSize, fontWeight: 800,
+            color: "var(--foreground)", lineHeight: 1, letterSpacing: -0.5, fontVariantNumeric: "tabular-nums",
+        }}>
+            ${display}
+        </span>
+    );
+}
+
+/* ── V2: Cab-Over Box Truck (detailed SVG with junk items per tier) ──── */
+function BoxTruck({ tierIndex, mounted }: { tierIndex: number; mounted: boolean }) {
+    const tier = LOAD_TIERS[tierIndex];
+    const isOverflow = tierIndex === 5;
+    const fillPct = Math.min(tier.fill, 1.0);
+    const boxX = 60, boxY = 48, boxW = 260, boxH = 120;
+    const boxBottom = boxY + boxH;
+    const fillH = fillPct * boxH;
+    const fillTop = boxBottom - fillH;
+    return (
+        <svg viewBox="0 0 480 228" width="100%" style={{
+            display: "block",
+            transform: mounted ? "translateX(0)" : "translateX(60px)",
+            opacity: mounted ? 1 : 0,
+            transition: "transform 0.7s cubic-bezier(0.16,1,0.3,1), opacity 0.5s ease",
+        }}>
+            <rect width="480" height="228" fill="none" />
+            <rect x="0" y="190" width="480" height="38" fill="#f1f5f9" />
+            <line x1="0" y1="190" x2="480" y2="190" stroke="#e2e8f0" strokeWidth="1" />
+            <ellipse cx="245" cy="194" rx="195" ry="5" fill="var(--foreground)" opacity="0.05" />
+            {/* Cargo box */}
+            <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="3" fill="#eaecf0" stroke="#b8bec6" strokeWidth="1.5" />
+            <rect x={boxX+2} y={boxY+2} width={boxW-4} height={boxH-4} rx="2" fill="#f0f2f5" />
+            {[0.25,0.5,0.75].map(p=>(
+                <line key={p} x1={boxX+boxW*p} y1={boxY} x2={boxX+boxW*p} y2={boxBottom} stroke="#d0d4da" strokeWidth="0.7"/>
             ))}
-            <path d="M210 50 L210 110 L280 110 L280 70 Q280 50 260 50 Z" fill="var(--foreground)" />
-            <rect x="240" y="60" width="30" height="20" rx="4" fill="#94CED8" opacity="0.4" />
-            <circle cx="60" cy="118" r="16" fill="#1E293B" /><circle cx="60" cy="118" r="8" fill="#475569" />
-            <circle cx="170" cy="118" r="16" fill="#1E293B" /><circle cx="170" cy="118" r="8" fill="#475569" />
-            <circle cx="260" cy="118" r="14" fill="#1E293B" /><circle cx="260" cy="118" r="7" fill="#475569" />
-            <text x="108" y={30 + 78 * (1 - fill) - 6} textAnchor="middle" fontSize="13" fontWeight="700" fill="var(--brand)">
-                {fillPercent > 1 ? "1+ Loads" : `${Math.round(fill * 100)}%`}
-            </text>
+            {/* Junk clipped */}
+            <defs><clipPath id="cargo"><rect x={boxX+2} y={boxY+2} width={boxW-4} height={boxH-4} rx="2"/></clipPath></defs>
+            <g clipPath="url(#cargo)">
+                <rect x={boxX} y={fillTop} width={boxW} height={fillH+2} fill="var(--brand)" opacity="0.04" style={{transition:"all 0.5s cubic-bezier(0.16,1,0.3,1)"}}/>
+                {/* T0: ⅛ */}
+                <g style={{opacity:tierIndex>=0?1:0,transition:"opacity 0.4s ease 0.05s"}}>
+                    <rect x="75" y="132" width="60" height="34" rx="4" fill="#a08058"/>
+                    <rect x="75" y="128" width="60" height="10" rx="3" fill="#b89468"/>
+                    <rect x="71" y="124" width="10" height="44" rx="4" fill="#b08a60"/>
+                    <rect x="129" y="124" width="10" height="44" rx="4" fill="#b08a60"/>
+                    <line x1="92" y1="136" x2="92" y2="160" stroke="#8a6e44" strokeWidth="0.7" opacity="0.4"/>
+                    <line x1="112" y1="136" x2="112" y2="160" stroke="#8a6e44" strokeWidth="0.7" opacity="0.4"/>
+                    <rect x="150" y="100" width="40" height="66" rx="3" fill="#b4c0cc" stroke="#9aacb8" strokeWidth="1"/>
+                    <rect x="154" y="104" width="32" height="26" rx="2" fill="#c6d0d8"/>
+                    <rect x="154" y="134" width="32" height="26" rx="2" fill="#c6d0d8"/>
+                    <circle cx="182" cy="117" r="1.5" fill="#8a9aaa"/>
+                    <circle cx="182" cy="147" r="1.5" fill="#8a9aaa"/>
+                </g>
+                {/* T1: ¼ */}
+                <g style={{opacity:tierIndex>=1?1:0,transition:"opacity 0.4s ease 0.1s"}}>
+                    <rect x="200" y="132" width="36" height="34" rx="3" fill="#d4a050" stroke="#c49040" strokeWidth="0.7"/>
+                    <line x1="218" y1="132" x2="218" y2="150" stroke="#c49040" strokeWidth="0.6" opacity="0.5"/>
+                    <rect x="204" y="108" width="30" height="26" rx="3" fill="#ddb060" stroke="#c49040" strokeWidth="0.7"/>
+                    <ellipse cx="252" cy="155" rx="15" ry="12" fill="#3a3a3a"/>
+                    <ellipse cx="252" cy="151" rx="10" ry="5.5" fill="#484848"/>
+                    <path d="M245 143 Q252 137 259 143" stroke="#555" strokeWidth="0.8" fill="none"/>
+                    <ellipse cx="272" cy="157" rx="12" ry="10" fill="#333"/>
+                    <rect x="244" y="122" width="22" height="20" rx="2" fill="#c89545" stroke="#b88535" strokeWidth="0.6"/>
+                </g>
+                {/* T2: ½ */}
+                <g style={{opacity:tierIndex>=2?1:0,transition:"opacity 0.4s ease 0.15s"}}>
+                    <rect x="72" y="84" width="52" height="40" rx="3" fill="#8b6b4a" stroke="#7a5c3e" strokeWidth="0.7"/>
+                    <rect x="76" y="88" width="20" height="14" rx="1.5" fill="#7a5c3e"/>
+                    <rect x="98" y="88" width="20" height="14" rx="1.5" fill="#7a5c3e"/>
+                    <rect x="76" y="106" width="20" height="14" rx="1.5" fill="#7a5c3e"/>
+                    <rect x="98" y="106" width="20" height="14" rx="1.5" fill="#7a5c3e"/>
+                    <rect x="132" y="90" width="26" height="14" rx="3" fill="#a88460"/>
+                    <rect x="136" y="104" width="4" height="22" rx="1" fill="#8a6d48"/>
+                    <rect x="152" y="104" width="4" height="22" rx="1" fill="#8a6d48"/>
+                    <rect x="242" y="94" width="28" height="32" rx="3" fill="#d4a050" stroke="#c49040" strokeWidth="0.7"/>
+                    <rect x="204" y="84" width="34" height="26" rx="3" fill="#c89545" stroke="#b88535" strokeWidth="0.7"/>
+                    <ellipse cx="286" cy="158" rx="13" ry="9" fill="#383838"/>
+                    <rect x="276" y="118" width="22" height="28" rx="2" fill="#ddb060"/>
+                </g>
+                {/* T3: ¾ */}
+                <g style={{opacity:tierIndex>=3?1:0,transition:"opacity 0.4s ease 0.2s"}}>
+                    <rect x="128" y="58" width="11" height="64" rx="3" fill="#b8c4d0" stroke="#a0aab6" strokeWidth="0.7"/>
+                    <rect x="146" y="64" width="42" height="7" rx="2" fill="#a88460"/>
+                    <rect x="150" y="71" width="4" height="26" rx="1" fill="#8a6d48"/>
+                    <rect x="180" y="71" width="4" height="26" rx="1" fill="#8a6d48"/>
+                    <rect x="196" y="60" width="38" height="24" rx="3" fill="#2d3748"/>
+                    <rect x="199" y="63" width="32" height="18" rx="2" fill="#4a5568"/>
+                    <rect x="210" y="84" width="14" height="3" rx="1" fill="#4a5568"/>
+                    <rect x="244" y="66" width="26" height="30" rx="3" fill="#ddb060" stroke="#c49040" strokeWidth="0.7"/>
+                    <rect x="72" y="64" width="26" height="22" rx="3" fill="#c89545"/>
+                    <rect x="100" y="60" width="22" height="26" rx="3" fill="#d4a050"/>
+                    <rect x="276" y="86" width="22" height="28" rx="2" fill="#b4c0cc"/>
+                    <ellipse cx="288" cy="132" rx="10" ry="9" fill="#383838"/>
+                </g>
+                {/* T4: Full */}
+                <g style={{opacity:tierIndex>=4?1:0,transition:"opacity 0.4s ease 0.25s"}}>
+                    <rect x="68" y="50" width="38" height="16" rx="2" fill="#c89545"/>
+                    <rect x="110" y="50" width="30" height="12" rx="2" fill="#d4a050"/>
+                    <rect x="144" y="50" width="36" height="14" rx="2" fill="#b8c4d0"/>
+                    <rect x="184" y="50" width="32" height="12" rx="2" fill="#ddb060"/>
+                    <rect x="220" y="50" width="38" height="16" rx="2" fill="#a88460"/>
+                    <rect x="262" y="50" width="34" height="14" rx="2" fill="#c89545"/>
+                    <rect x="80" y="50" width="8" height="10" rx="1" fill="#8b6b4a"/>
+                    <rect x="164" y="51" width="6" height="8" rx="1" fill="#3a3a3a"/>
+                    <rect x="254" y="50" width="6" height="12" rx="1" fill="#333"/>
+                </g>
+                {/* T5: overflow */}
+                {isOverflow&&(<g style={{opacity:1,transition:"opacity 0.4s ease 0.3s"}}><rect x={boxX} y={boxY} width={boxW} height={boxH} fill="var(--brand)" opacity="0.06"/></g>)}
+            </g>
+            {/* Fill marker LEFT */}
+            {!isOverflow&&(<>
+                <line x1={boxX-4} y1={fillTop} x2={boxX+boxW+4} y2={fillTop} stroke="var(--brand)" strokeWidth="1.5" strokeDasharray="5 3" opacity="0.5" style={{transition:"all 0.5s cubic-bezier(0.16,1,0.3,1)"}}/>
+                <g style={{transition:"all 0.5s cubic-bezier(0.16,1,0.3,1)"}} transform={`translate(${boxX-56},${fillTop})`}>
+                    <rect x="0" y="-12" width="50" height="22" rx="6" fill="var(--brand)"/>
+                    <text x="25" y="3" textAnchor="middle" fontSize="10" fontWeight="700" fill="white" fontFamily="var(--heading-font)">{tier.label}</text>
+                </g>
+            </>)}
+            {isOverflow&&(<g>
+                <line x1={boxX-4} y1={boxY} x2={boxX+boxW+4} y2={boxY} stroke="var(--brand)" strokeWidth="2" opacity="0.7"/>
+                <g transform={`translate(${boxX-58},${boxY})`}>
+                    <rect x="0" y="-12" width="54" height="22" rx="6" fill="var(--brand)"/>
+                    <text x="27" y="3" textAnchor="middle" fontSize="9" fontWeight="700" fill="white" fontFamily="var(--heading-font)">1+ LOADS</text>
+                </g>
+                <g opacity="0.5">
+                    <path d={`M${boxX+boxW/2-20} ${boxY-10} L${boxX+boxW/2-20} ${boxY-22} L${boxX+boxW/2-14} ${boxY-16}`} fill="none" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d={`M${boxX+boxW/2+20} ${boxY-10} L${boxX+boxW/2+20} ${boxY-22} L${boxX+boxW/2+26} ${boxY-16}`} fill="none" stroke="var(--brand)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </g>
+            </g>)}
+            {/* Frame */}
+            <rect x={boxX} y={boxY} width={boxW} height={boxH} rx="3" fill="none" stroke="#8892a0" strokeWidth="2"/>
+            <rect x={boxX-2} y={boxY-4} width={boxW+4} height="6" rx="2" fill="#6b7280"/>
+            <rect x={boxX-4} y={boxBottom} width={boxW+52} height="10" rx="3" fill="#4b5563"/>
+            {/* Cab */}
+            <rect x="326" y="62" width="80" height="108" rx="6" fill="#1e293b"/>
+            <rect x="400" y="62" width="32" height="108" rx="4" fill="#111827"/>
+            <rect x="322" y="56" width="96" height="12" rx="5" fill="#334155"/>
+            <rect x="322" y="54" width="96" height="6" rx="3" fill="#475569"/>
+            <rect x="404" y="68" width="24" height="46" rx="4" fill="#60a5fa" opacity="0.5"/>
+            <rect x="406" y="70" width="10" height="42" rx="3" fill="#93c5fd" opacity="0.25"/>
+            <rect x="334" y="70" width="42" height="34" rx="4" fill="#60a5fa" opacity="0.4"/>
+            <rect x="380" y="70" width="22" height="34" rx="4" fill="#60a5fa" opacity="0.35"/>
+            <rect x="376" y="68" width="5" height="38" rx="1" fill="#1e293b"/>
+            <rect x="336" y="110" width="38" height="56" rx="3" fill="none" stroke="#334155" strokeWidth="1.5"/>
+            <rect x="356" y="132" width="14" height="4" rx="2" fill="#4b5563"/>
+            <rect x="424" y="78" width="6" height="16" rx="3" fill="#fbbf24" opacity="0.9"/>
+            <rect x="424" y="110" width="6" height="6" rx="2" fill="var(--brand)" opacity="0.7"/>
+            <rect x="418" y="168" width="18" height="10" rx="3" fill="#6b7280"/>
+            <rect x="326" y="170" width="50" height="6" rx="2" fill="#4b5563"/>
+            <rect x="318" y="80" width="12" height="18" rx="3" fill="#374151"/>
+            <rect x="314" y="82" width="8" height="14" rx="3" fill="#475569"/>
+            <rect x="326" y="154" width="80" height="4" rx="1" fill="var(--brand)" opacity="0.6"/>
+            <rect x={boxX} y={boxBottom-5} width={boxW} height="3" rx="1" fill="var(--brand)" opacity="0.25"/>
+            {/* Wheels */}
+            {[112,172].map(cx=>(<g key={cx}><circle cx={cx} cy="190" r="22" fill="#111827"/><circle cx={cx} cy="190" r="18" fill="#1e293b"/><circle cx={cx} cy="190" r="13" fill="#374151"/><circle cx={cx} cy="190" r="5.5" fill="#4b5563"/><circle cx={cx} cy="190" r="2" fill="#6b7280"/></g>))}
+            <path d="M84 182 Q112 158 140 182" fill="#1e293b"/><path d="M144 182 Q172 158 200 182" fill="#1e293b"/>
+            <circle cx="378" cy="190" r="22" fill="#111827"/><circle cx="378" cy="190" r="18" fill="#1e293b"/><circle cx="378" cy="190" r="13" fill="#374151"/><circle cx="378" cy="190" r="5.5" fill="#4b5563"/><circle cx="378" cy="190" r="2" fill="#6b7280"/>
+            <path d="M350 182 Q378 158 406 182" fill="#1e293b"/>
         </svg>
+    );
+}
+
+/* ── V2: 6-Node Step Slider ───────────────────────────────────────────── */
+function StepSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+    const trackRef = useRef<HTMLDivElement>(null);
+    const [dragging, setDragging] = useState(false);
+    const steps = 6;
+    const prevStep = useRef(value);
+    const haptic = () => { try { if (navigator.vibrate) navigator.vibrate(10); } catch {} };
+    const setWithHaptic = useCallback((v: number) => {
+        const c = Math.max(0, Math.min(steps-1, v));
+        if (c !== prevStep.current) { haptic(); prevStep.current = c; }
+        onChange(c);
+    }, [onChange]);
+    const getStep = useCallback((clientX: number) => {
+        if (!trackRef.current) return value;
+        const rect = trackRef.current.getBoundingClientRect();
+        return Math.round(Math.max(0, Math.min(1, (clientX-rect.left)/rect.width)) * (steps-1));
+    }, [value]);
+    const onStart = (x: number) => { setDragging(true); setWithHaptic(getStep(x)); };
+    useEffect(() => {
+        if (!dragging) return;
+        const move = (e: MouseEvent | TouchEvent) => setWithHaptic(getStep((e as TouchEvent).touches ? (e as TouchEvent).touches[0].clientX : (e as MouseEvent).clientX));
+        const end = () => setDragging(false);
+        window.addEventListener("mousemove", move);
+        window.addEventListener("mouseup", end);
+        window.addEventListener("touchmove", move, { passive: true });
+        window.addEventListener("touchend", end);
+        return () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", end); window.removeEventListener("touchmove", move); window.removeEventListener("touchend", end); };
+    }, [dragging, getStep, setWithHaptic]);
+    const onKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key==="ArrowRight"||e.key==="ArrowUp") { e.preventDefault(); setWithHaptic(value+1); }
+        if (e.key==="ArrowLeft"||e.key==="ArrowDown") { e.preventDefault(); setWithHaptic(value-1); }
+    };
+    const pct = (value/(steps-1))*100;
+    return (
+        <div style={{ padding: "0 20px" }}>
+            <div ref={trackRef} role="slider" aria-valuemin={0} aria-valuemax={5} aria-valuenow={value}
+                aria-label="Load size" tabIndex={0} onKeyDown={onKeyDown}
+                style={{ position:"relative", height:50, cursor:"pointer", touchAction:"none", userSelect:"none", outline:"none" }}
+                onMouseDown={e=>onStart(e.clientX)} onTouchStart={e=>onStart(e.touches[0].clientX)}>
+                <div style={{ position:"absolute", top:21, left:0, right:0, height:8, borderRadius:4, background:"var(--border, #e2e8f0)" }}/>
+                <div style={{
+                    position:"absolute", top:21, left:0, height:8, borderRadius:4,
+                    width:`${pct}%`, background:`linear-gradient(90deg, var(--brand), var(--brand-dark))`,
+                    boxShadow:"0 2px 8px rgba(var(--brand-rgb, 249,115,22),0.2)",
+                    transition: dragging ? "none" : "width 0.35s cubic-bezier(0.16,1,0.3,1)",
+                }}/>
+                {Array.from({length:steps}).map((_,i)=>{
+                    const left=(i/(steps-1))*100;
+                    const cur=i===value, past=i<value;
+                    return (
+                        <div key={i} style={{
+                            position:"absolute", top:cur?13:18, left:`${left}%`, transform:"translateX(-50%)",
+                            width:cur?24:past?12:10, height:cur?24:past?12:10,
+                            borderRadius:"50%", background:cur?"var(--card, #fff)":past?"var(--brand)":"var(--border, #cbd5e1)",
+                            border:cur?"4px solid var(--brand)":"none",
+                            boxShadow:cur?"0 0 0 4px rgba(var(--brand-rgb, 249,115,22),0.13), 0 2px 10px rgba(var(--brand-rgb, 249,115,22),0.25)":"none",
+                            transition: dragging ? "none" : "all 0.3s cubic-bezier(0.16,1,0.3,1)",
+                            zIndex:cur?3:1,
+                        }}/>
+                    );
+                })}
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between" }}>
+                {LOAD_TIERS.map((t,i)=>(
+                    <span key={i} style={{
+                        fontSize:9.5, fontWeight:i===value?700:500,
+                        color:i===value?"var(--brand)":"var(--muted, #b0b8c4)",
+                        fontFamily:"var(--heading-font)",
+                        textAlign:"center", flex:1, transition:"all 0.2s",
+                    }}>{t.label}</span>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+/* ── V2: Compare All Grid ────────────────────────────────────────────── */
+function CompareGrid({ currentStep, onChange, pricing }: { currentStep: number; onChange: (i: number) => void; pricing: { tiers: { id: string; min: number; max: number }[] } }) {
+    return (
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3, 1fr)", gap:8, padding:"0 12px" }}>
+            {LOAD_TIERS.map((t,i)=>{
+                const active = i===currentStep;
+                const priceTier = pricing.tiers.find(pt => pt.id === t.volumeId);
+                return (
+                    <button key={i} onClick={()=>onChange(i)} style={{
+                        padding:"12px 10px", borderRadius: "var(--card-radius, 12px)", cursor:"pointer", textAlign:"center",
+                        border: active ? "2px solid var(--brand)" : "1.5px solid var(--border, #e2e8f0)",
+                        background: active ? "rgba(var(--brand-rgb, 249,115,22),0.06)" : "var(--card, #fff)",
+                        transition:"all 0.2s", position:"relative", fontFamily: "inherit",
+                    }}>
+                        {t.popular&&(
+                            <div style={{
+                                position:"absolute", top:-7, left:"50%", transform:"translateX(-50%)",
+                                fontSize:8, fontWeight:700, color:"#fff", background:"var(--brand)",
+                                padding:"1px 6px", borderRadius:999, letterSpacing:0.3,
+                                textTransform:"uppercase", whiteSpace:"nowrap",
+                            }}>Most common</div>
+                        )}
+                        <div style={{ fontSize:11, fontWeight:700, color:active?"var(--brand)":"var(--foreground)", fontFamily:"var(--heading-font)" }}>
+                            {t.label}
+                        </div>
+                        <div style={{ fontSize:9.5, color:"var(--muted)", marginTop:3, lineHeight:1.3, minHeight:28 }}>{t.title}</div>
+                        <div style={{ fontFamily:"var(--heading-font)", fontSize:16, fontWeight:800, color:"var(--foreground)", marginTop:6 }}>
+                            {priceTier ? `$${roundTo5(priceTier.min)}` : "—"}
+                        </div>
+                        <div style={{ fontSize:9, color:"var(--muted)", marginTop:2 }}>{t.bags}</div>
+                        <div style={{
+                            width:14, height:14, borderRadius:"50%", margin:"8px auto 0",
+                            border: active ? "4px solid var(--brand)" : "2px solid var(--border, #cbd5e1)",
+                            background:"var(--card, #fff)", boxSizing:"border-box",
+                            transition:"all 0.15s",
+                        }}/>
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+/* ── V2: Edge Case Toggle ────────────────────────────────────────────── */
+function EdgeToggle({ item, checked, onChange }: { item: typeof EDGE_CASES[number]; checked: boolean; onChange: () => void }) {
+    return (
+        <label style={{ display:"flex", alignItems:"flex-start", gap:12, cursor:"pointer", padding:"10px 0" }} onClick={onChange}>
+            <div style={{
+                flexShrink:0, width:20, height:20, borderRadius:6, marginTop:1,
+                border: checked ? "2px solid var(--brand)" : "2px solid var(--border, #cbd5e1)",
+                background: checked ? "var(--brand)" : "var(--card, #fff)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                transition:"all 0.15s ease",
+            }}>
+                {checked&&(<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2.5 6.5L5 9L9.5 3.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>)}
+            </div>
+            <div style={{ flex:1 }}>
+                <div style={{ fontSize:14, fontWeight:500, color:"var(--foreground)", lineHeight:1.35 }}>{item.label}</div>
+                {item.detail&&<div style={{ fontSize:12, color:"var(--muted)", marginTop:1 }}>{item.detail}</div>}
+            </div>
+        </label>
     );
 }
 
@@ -136,10 +437,11 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     const saved = useRef(loadSavedWizard()).current;
 
     const [step, setStep] = useState(saved?.step ?? 0);
-    const [selectedCategories, setSelectedCategories] = useState<string[]>(saved?.selectedCategories ?? []);
-    const [selectedItems, setSelectedItems] = useState<ItemQtyMap>(saved?.selectedItems ?? {});
-    const [pileSizes, setPileSizes] = useState<Record<string, string>>(saved?.pileSizes ?? {});
-    const [volume, setVolume] = useState<string | null>(saved?.volume ?? null);
+    const [tierIndex, setTierIndex] = useState<number>(saved?.tierIndex ?? 1);
+    const [edgeCases, setEdgeCases] = useState<Record<string, boolean>>(saved?.edgeCases ?? {});
+    const [viewMode, setViewMode] = useState<"slider" | "compare">("slider");
+    const [mounted, setMounted] = useState(false);
+    const [volume, setVolume] = useState<string | null>(saved?.volume ?? LOAD_TIERS[1].volumeId);
     const [location, setLocation] = useState<string | null>(saved?.location ?? null);
     const [selectedDate, setSelectedDate] = useState<Date | null>(saved?.selectedDate ? new Date(saved.selectedDate) : null);
     const [selectedTime, setSelectedTime] = useState<string | null>(() => {
@@ -210,7 +512,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     /* ── Save wizard state to sessionStorage on every change ── */
     useEffect(() => {
         const data = {
-            step, selectedCategories, selectedItems, pileSizes, volume, location,
+            step, tierIndex, edgeCases, volume, location,
             selectedDate: selectedDate?.toISOString() ?? null,
             selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
             termsAccepted, signatureDataUrl, serviceType, containerSize, debrisType,
@@ -218,7 +520,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             addressConfirmed,
         };
         try { sessionStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify(data)); } catch {}
-    }, [step, selectedCategories, selectedItems, pileSizes, volume, location,
+    }, [step, tierIndex, edgeCases, volume, location,
         selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
         termsAccepted, signatureDataUrl, serviceType, containerSize, debrisType,
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
@@ -376,74 +678,14 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         // If step === 0, browser back navigates away from /book naturally
     };
 
-    const toggleCategory = (id: string) =>
-        setSelectedCategories(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+    const toggleEdge = (id: string) =>
+        setEdgeCases(prev => ({ ...prev, [id]: !prev[id] }));
 
-    const toggleItem = (catId: string, itemId: string) => {
-        setSelectedItems(prev => {
-            const cur = prev[catId] || {};
-            if (cur[itemId]) { const { [itemId]: _, ...rest } = cur; return { ...prev, [catId]: rest }; }
-            return { ...prev, [catId]: { ...cur, [itemId]: 1 } };
-        });
-    };
+    const hasEdgeCase = Object.values(edgeCases).some(Boolean);
 
-    const updateQty = (catId: string, itemId: string, delta: number) => {
-        setSelectedItems(prev => {
-            const cur = prev[catId] || {};
-            const qty = (cur[itemId] || 1) + delta;
-            if (qty <= 0) { const { [itemId]: _, ...rest } = cur; return { ...prev, [catId]: rest }; }
-            return { ...prev, [catId]: { ...cur, [itemId]: qty } };
-        });
-    };
-
-    const totalItems = Object.values(selectedItems).reduce(
-        (s, c) => s + Object.values(c).reduce((a, q) => a + q, 0), 0
-    );
-    const totalPiles = Object.keys(pileSizes).length;
-
-    /* ── Auto-estimate volume from items & piles ──────────────────── */
-    const ITEM_FILL: Record<string, number> = { heavy: 0.08, medium: 0.05, light: 0.02 };
-    const PILE_FILL: Record<string, number> = { small: 0.06, medium: 0.15, large: 0.25, xl: 0.35 };
-
-    const estimatedFill = useMemo(() => {
-        let fill = 0;
-        // Sum item contributions
-        for (const catId of selectedCategories) {
-            const cat = JUNK_CATEGORIES.find(c => c.id === catId);
-            if (cat?.inputType === "quantity") {
-                const items = CATEGORY_ITEMS[catId] || [];
-                const catItems = selectedItems[catId] || {};
-                for (const [itemId, qty] of Object.entries(catItems)) {
-                    const item = items.find(i => i.id === itemId);
-                    fill += (ITEM_FILL[item?.weight || "medium"] || 0.05) * qty;
-                }
-            } else if (cat?.inputType === "pile" && pileSizes[catId]) {
-                fill += PILE_FILL[pileSizes[catId]] || 0.1;
-            }
-        }
-        return fill;
-    }, [selectedCategories, selectedItems, pileSizes]);
-
-    const estimatedVolumeId = useMemo(() => {
-        if (estimatedFill <= 0) return null;
-        // Find the closest volume tier
-        let best = VOLUME_OPTIONS[0];
-        for (const v of VOLUME_OPTIONS) {
-            if (Math.abs(v.truckFill - estimatedFill) < Math.abs(best.truckFill - estimatedFill)) {
-                best = v;
-            }
-        }
-        return best.id;
-    }, [estimatedFill]);
-
-    // Auto-select volume when entering step 3 if user hasn't manually chosen
-    const [volumeAutoSet, setVolumeAutoSet] = useState(false);
-    useEffect(() => {
-        if (currentPhase === "junk_volume" && !volumeAutoSet && estimatedVolumeId && volume === null) {
-            setVolume(estimatedVolumeId);
-            setVolumeAutoSet(true);
-        }
-    }, [currentPhase, estimatedVolumeId, volume, volumeAutoSet]);
+    /* ── Sync tierIndex → volume ── */
+    useEffect(() => { setVolume(LOAD_TIERS[tierIndex].volumeId); }, [tierIndex]);
+    useEffect(() => { const t = setTimeout(() => setMounted(true), 50); return () => clearTimeout(t); }, []);
 
     /* ── Pricing from config ─────────────────────────────────────── */
     const pricing = config.pricing;
@@ -461,22 +703,12 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 return hasRequired && areaOk;
             }
             case "service_type": return serviceType !== null;
-            case "junk_type": return selectedCategories.length > 0;
-            case "junk_items": {
-                return selectedCategories.every(catId => {
-                    const cat = JUNK_CATEGORIES.find(c => c.id === catId);
-                    if (!cat) return false;
-                    if (cat.inputType === "pile") return !!pileSizes[catId];
-                    return Object.values(selectedItems[catId] || {}).some(q => q > 0);
-                });
-            }
-            case "junk_volume": return volume !== null;
+            case "load_estimate": return volume !== null;
             case "junk_location": return location !== null;
             case "dumpster_size": return containerSize !== null;
             case "dumpster_details": return debrisType !== null && rentalDuration !== null;
             case "schedule": {
                 if (!selectedDate || !selectedTime) return false;
-                // Block dumpster bookings when date-specific check says unavailable
                 if ((serviceType === "dumpster" || serviceType === "both") && containerAvailability?.available === false) return false;
                 return true;
             }
@@ -537,53 +769,33 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
 
             /* ── JUNK REMOVAL payload ── */
             const sendJunkBooking = async () => {
-                const structuredItems: { category: string; item: string; qty: number }[] = [];
-                Object.entries(selectedItems).forEach(([catId, items]) => {
-                    const catLabel = JUNK_CATEGORIES.find(c => c.id === catId)?.label || catId;
-                    Object.entries(items).forEach(([itemName, qty]) => {
-                        if (qty > 0) structuredItems.push({ category: catLabel, item: itemName, qty });
-                    });
-                });
-                const structuredPiles: { category: string; size: string }[] = [];
-                Object.entries(pileSizes).forEach(([catId, sizeId]) => {
-                    const catLabel = JUNK_CATEGORIES.find(c => c.id === catId)?.label || catId;
-                    const sizeLabel = PILE_SIZES.find(p => p.id === sizeId)?.label || sizeId;
-                    structuredPiles.push({ category: catLabel, size: sizeLabel });
-                });
-                const descParts: string[] = [];
-                selectedCategories.forEach(catId => {
-                    const catLabel = JUNK_CATEGORIES.find(c => c.id === catId)?.label || catId;
-                    const catItems = selectedItems[catId];
-                    const pileSize = pileSizes[catId];
-                    if (catItems && Object.keys(catItems).length > 0) {
-                        const itemStrs = Object.entries(catItems).filter(([, qty]) => qty > 0).map(([name, qty]) => qty > 1 ? `${name} ×${qty}` : name);
-                        descParts.push(`${catLabel}: ${itemStrs.join(", ")}`);
-                    } else if (pileSize) {
-                        descParts.push(`${catLabel}: ${PILE_SIZES.find(p => p.id === pileSize)?.label || pileSize}`);
-                    }
-                });
-                const description = descParts.join("; ") || `${tierData?.label || ""} junk removal`;
+                const loadTier = LOAD_TIERS[tierIndex];
+                const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
+                const description = hasEdgeCase
+                    ? `${loadTier.title} — custom estimate (${edgeCaseIds.join(", ")})`
+                    : `${loadTier.title} junk removal`;
                 const volumeOption = VOLUME_OPTIONS.find(v => v.id === volume);
                 const locationOption = LOCATION_OPTIONS.find(l => l.id === location);
-                const categoryLabels = selectedCategories.map(catId => JUNK_CATEGORIES.find(c => c.id === catId)?.label || catId);
                 const minPrice = tierData ? roundTo5(tierData.min + totalAdj) : 0;
                 const maxPrice = tierData ? roundTo5(tierData.max + totalAdj) : 0;
-                const quoteRangeStr = tierData ? `$${minPrice} – $${maxPrice}` : "";
+                const quoteRangeStr = hasEdgeCase ? "On-Site Estimate" : (tierData ? `$${minPrice} – $${maxPrice}` : "");
                 const stairsAccessLabel = locationOption?.label || "Ground Floor";
 
                 const payload: Record<string, unknown> = {
                     status: "booked", serviceType: "junk_removal",
                     name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
-                    value: minPrice || undefined, notes: contact.notes || "",
+                    value: hasEdgeCase ? undefined : (minPrice || undefined), notes: contact.notes || "",
                     metadata: {
                         serviceType: "junk_removal",
                         customerType: contact.customerType,
                         timeSlot: selectedTime || "",
                         truckLoad: volumeOption?.fraction || "", quoteRange: quoteRangeStr,
+                        loadTier: loadTier.title,
                         junkLocation: locationOption?.label || "", stairsAccess: stairsAccessLabel,
-                        categories: categoryLabels, items: structuredItems, piles: structuredPiles,
-                        priceRange: tierData ? [minPrice, maxPrice] : null,
+                        specialConditions: edgeCaseIds,
+                        edgeCaseNote: hasEdgeCase ? "Customer flagged special conditions — crew estimates on-site" : "",
+                        priceRange: hasEdgeCase ? null : (tierData ? [minPrice, maxPrice] : null),
                         surcharges: [
                             ...(priceAdj > 0 ? [{ id: "stairs", label: stairsSurcharge?.label, amount: priceAdj }] : []),
                             ...(distanceSurcharge > 0 ? [{ id: "distance", label: "Distance surcharge", amount: distanceSurcharge }] : []),
@@ -732,7 +944,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         } finally {
             setSubmitting(false);
         }
-    }, [contact, selectedCategories, selectedItems, pileSizes, volume, location, selectedDate, selectedTime, tierData, priceAdj, distanceSurcharge, totalAdj, stairsSurcharge, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference]);
+    }, [contact, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, priceAdj, distanceSurcharge, totalAdj, stairsSurcharge, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference]);
 
     const formatPhone = (val: string) => {
         const digits = val.replace(/\D/g, "").slice(0, 10);
@@ -741,13 +953,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
     };
 
-    /* ── Selection summary for Step 2 ─────────────────────────────── */
-    const selectionSummary = () => {
-        const parts: string[] = [];
-        if (totalItems > 0) parts.push(`${totalItems} item${totalItems !== 1 ? "s" : ""}`);
-        if (totalPiles > 0) parts.push(`${totalPiles} pile${totalPiles !== 1 ? "s" : ""}`);
-        return parts.join(" + ") + " selected";
-    };
+
 
     /* ── Render ──────────────────────────────────────────────────────────── */
     return (
@@ -946,172 +1152,116 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                     </div>
                 )}
 
-                {/* ── JUNK TYPE: Category selection ─────────────────────────────── */}
-                {currentPhase === "junk_type" && (
+                {/* ── LOAD ESTIMATE (V2) ─────────────────────────────────────── */}
+                {currentPhase === "load_estimate" && (
                     <div>
-                        <div style={{ textAlign: "center", marginBottom: 32 }}>
-                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><Trash2 size={26} color="var(--brand)" /></div>
-                            <h1 style={{ fontSize: 26, marginBottom: 8, color: "var(--foreground)" }}>What kind of junk are we hauling?</h1>
-                            <p style={{ color: "var(--muted)", fontSize: 15 }}>Select all categories that apply.</p>
+                        <div style={{ textAlign: "center", marginBottom: 12 }}>
+                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(var(--brand-rgb, 249,115,22),0.1)", border: "1px solid rgba(var(--brand-rgb, 249,115,22),0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><Truck size={26} color="var(--brand)" /></div>
+                            <h1 style={{ fontFamily: "var(--heading-font)", fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px", letterSpacing: -0.3 }}>
+                                How much junk are we hauling?
+                            </h1>
+                            <p style={{ fontSize: 14, color: "var(--muted)", margin: 0 }}>Drag the slider — watch the truck fill up.</p>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: 12 }}>
-                            {JUNK_CATEGORIES.map(cat => (
-                                <div key={cat.id} className="card" onClick={() => toggleCategory(cat.id)}
-                                    style={{ textAlign: "center", cursor: "pointer", position: "relative", background: selectedCategories.includes(cat.id) ? "#FFF7ED" : "var(--card)", borderColor: selectedCategories.includes(cat.id) ? "var(--brand)" : undefined }}>
-                                    {selectedCategories.includes(cat.id) && (
-                                        <div style={{ position: "absolute", top: 10, right: 10, width: 22, height: 22, borderRadius: "50%", background: "var(--brand)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                            <Check size={14} />
+
+                        {/* View toggle */}
+                        <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 12px", marginBottom: 10 }}>
+                            <div style={{ display: "inline-flex", background: "var(--border, #f1f5f9)", borderRadius: 8, padding: 2 }}>
+                                {([{ key: "slider" as const, label: "Slider" }, { key: "compare" as const, label: "Compare all" }]).map(v => (
+                                    <button key={v.key} onClick={() => setViewMode(v.key)} style={{
+                                        padding: "5px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+                                        fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                                        background: viewMode === v.key ? "var(--card, #fff)" : "transparent",
+                                        color: viewMode === v.key ? "var(--foreground)" : "var(--muted)",
+                                        boxShadow: viewMode === v.key ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                                        transition: "all 0.15s",
+                                    }}>{v.label}</button>
+                                ))}
+                            </div>
+                        </div>
+
+                        {/* Truck + Slider OR Compare Grid */}
+                        {viewMode === "slider" ? (
+                            <>
+                                <div style={{ margin: "0 12px", borderRadius: 20, overflow: "hidden", border: "1px solid var(--border, #e2e8f0)", background: "#f8fafc" }}>
+                                    <BoxTruck tierIndex={tierIndex} mounted={mounted} />
+                                </div>
+                                <div style={{ marginTop: 20 }}><StepSlider value={tierIndex} onChange={setTierIndex} /></div>
+                            </>
+                        ) : (
+                            <CompareGrid currentStep={tierIndex} onChange={setTierIndex} pricing={pricing} />
+                        )}
+
+                        {/* Info Card with client pricing */}
+                        <div style={{ margin: "20px 12px 0", padding: "18px 20px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+                                <div style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: "rgba(var(--brand-rgb, 249,115,22),0.05)", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${Math.min(LOAD_TIERS[tierIndex].fill, 1) * 100}%`, background: "rgba(var(--brand-rgb, 249,115,22),0.1)", transition: "height 0.4s cubic-bezier(0.16,1,0.3,1)" }} />
+                                    <Truck size={20} color="var(--brand)" style={{ position: "relative", zIndex: 1 }} />
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                    <div style={{ fontFamily: "var(--heading-font)", fontSize: 17, fontWeight: 700, color: "var(--foreground)", marginBottom: 3, lineHeight: 1.3 }}>
+                                        {LOAD_TIERS[tierIndex].title}
+                                        {LOAD_TIERS[tierIndex].popular && (
+                                            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--brand)", background: "rgba(var(--brand-rgb, 249,115,22),0.06)", padding: "2px 8px", borderRadius: 999, marginLeft: 8, verticalAlign: "middle", letterSpacing: 0.3, textTransform: "uppercase" }}>
+                                                Most common
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>{LOAD_TIERS[tierIndex].desc}</p>
+                                </div>
+                                <div style={{ flexShrink: 0, textAlign: "right" }}>
+                                    {hasEdgeCase ? (
+                                        <div style={{ background: "rgba(var(--foreground-rgb, 0,0,0),0.04)", borderRadius: 10, padding: "8px 12px" }}>
+                                            <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.3, whiteSpace: "nowrap" }}>Free On-Site</div>
+                                            <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)" }}>Estimate</div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ background: "rgba(var(--brand-rgb, 249,115,22),0.05)", borderRadius: 10, padding: "8px 12px" }}>
+                                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 500, marginBottom: 1 }}>Starting from</div>
+                                            {tierData && <AnimatedPrice value={roundTo5(tierData.min + totalAdj)} fontSize={22} />}
+                                            <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3, lineHeight: 1.2 }}>Finalized on-site</div>
                                         </div>
                                     )}
-                                    <div style={{ marginBottom: 8, display: "flex", justifyContent: "center" }}><ServiceIcon name={cat.icon} size={32} color="var(--brand)" /></div>
-                                    <div style={{ fontWeight: 600, fontSize: 14, color: "var(--foreground)", marginBottom: 4 }}>{cat.label}</div>
-                                    <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>{cat.desc}</div>
+                                </div>
+                            </div>
+                            <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border, #f1f5f9)", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.6, display: "flex", gap: 6 }}>
+                                <span style={{ fontSize: 14, lineHeight: "18px", flexShrink: 0 }}>💡</span>
+                                <span>This is an estimate based on load size. <strong style={{ color: "var(--foreground)" }}>Your crew will confirm the final price on-site before any work begins.</strong> You only pay for what we actually haul.</span>
+                            </div>
+                        </div>
+
+                        {/* Guarantee badge */}
+                        <div style={{
+                            margin: "12px 12px 0", padding: "12px 16px",
+                            background: "#f0fdf4", borderRadius: 12, border: "1px solid #bbf7d0",
+                            display: "flex", alignItems: "center", gap: 10,
+                        }}>
+                            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" style={{ flexShrink: 0 }}>
+                                <path d="M10 1L12.5 4L16.5 3.5L15.5 7.5L18.5 10L15.5 12.5L16.5 16.5L12.5 16L10 19L7.5 16L3.5 16.5L4.5 12.5L1.5 10L4.5 7.5L3.5 3.5L7.5 4L10 1Z"
+                                    fill="#22c55e" opacity="0.15" stroke="#16a34a" strokeWidth="1.2" />
+                                <path d="M7 10.5L9 12.5L13 8" stroke="#16a34a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            <span style={{ fontSize: 12.5, color: "#15803d", lineHeight: 1.4 }}>
+                                <strong>Pay-less guarantee:</strong> If we haul less than estimated, your price goes down. Never up.
+                            </span>
+                        </div>
+
+                        {/* Edge Cases */}
+                        <div style={{ margin: "12px 12px 0", padding: "18px 20px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Does your load include any of the following?</div>
+                            <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>These may require a custom quote.</div>
+                            {EDGE_CASES.map((item, i) => (
+                                <div key={item.id}>
+                                    {i > 0 && <div style={{ height: 1, background: "var(--border, #f1f5f9)" }} />}
+                                    <EdgeToggle item={item} checked={!!edgeCases[item.id]} onChange={() => toggleEdge(item.id)} />
                                 </div>
                             ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* ── JUNK ITEMS: Items / Pile Size ──────────────────────────── */}
-                {currentPhase === "junk_items" && (
-                    <div>
-                        <div style={{ textAlign: "center", marginBottom: 32 }}>
-                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><ClipboardList size={26} color="var(--brand)" /></div>
-                            <h1 style={{ fontSize: 26, marginBottom: 8, color: "var(--foreground)" }}>Tell us what you have</h1>
-                            <p style={{ color: "var(--muted)", fontSize: 15 }}>Pick items or estimate pile sizes for each category.</p>
-                        </div>
-                        {selectedCategories.map(catId => {
-                            const cat = JUNK_CATEGORIES.find(c => c.id === catId);
-                            if (!cat) return null;
-
-                            /* ── PILE input ─────────────────────────────── */
-                            if (cat.inputType === "pile") {
-                                const selected = pileSizes[catId];
-                                return (
-                                    <div key={catId} style={{ marginBottom: 28 }}>
-                                        <h3 style={{ fontFamily: "var(--heading-font)", fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                                            <ServiceIcon name={cat.icon} size={16} color="var(--brand)" /> {cat.label} — How big is the pile?
-                                        </h3>
-                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
-                                            {PILE_SIZES.map(size => (
-                                                <div key={size.id}
-                                                    onClick={() => setPileSizes(prev => ({ ...prev, [catId]: size.id }))}
-                                                    style={{
-                                                        background: selected === size.id ? "#FFF7ED" : "var(--card)",
-                                                        border: `2px solid ${selected === size.id ? "var(--brand)" : "var(--border, #E2E8F0)"}`,
-                                                        borderRadius: 14, padding: "16px 14px", textAlign: "center", cursor: "pointer", transition: "all 0.15s",
-                                                        position: "relative",
-                                                    }}>
-                                                    {selected === size.id && (
-                                                        <div style={{ position: "absolute", top: 8, right: 8, width: 20, height: 20, borderRadius: "50%", background: "var(--brand)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                            <Check size={12} />
-                                                        </div>
-                                                    )}
-                                                    <div style={{ marginBottom: 6, display: "flex", justifyContent: "center" }}><ServiceIcon name={size.icon} size={24} color="var(--brand)" /></div>
-                                                    <div style={{ fontWeight: 700, fontSize: 14, color: "var(--foreground)", marginBottom: 4 }}>{size.label}</div>
-                                                    <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>{size.desc}</div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                );
-                            }
-
-                            /* ── QUANTITY input ─────────────────────────── */
-                            const items = CATEGORY_ITEMS[catId] || [];
-                            return (
-                                <div key={catId} style={{ marginBottom: 28 }}>
-                                    <h3 style={{ fontFamily: "var(--heading-font)", fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 12, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                                        <ServiceIcon name={cat.icon} size={16} color="var(--brand)" /> {cat.label}
-                                    </h3>
-                                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8 }}>
-                                        {items.map(item => {
-                                            const qty = (selectedItems[catId] || {})[item.id];
-                                            const active = !!qty;
-                                            return (
-                                                <div key={item.id} onClick={() => !active && toggleItem(catId, item.id)}
-                                                    style={{
-                                                        display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 12,
-                                                        background: active ? "#FFF7ED" : "var(--card)", border: `2px solid ${active ? "var(--brand)" : "var(--border, #E2E8F0)"}`, cursor: "pointer", transition: "all 0.15s",
-                                                    }}>
-                                                    <div>
-                                                        <div style={{ fontWeight: 600, fontSize: 13, color: "var(--foreground)" }}>{item.label}</div>
-                                                        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>{item.weight === "heavy" ? "⚠️ Heavy" : item.weight === "medium" ? "Medium" : "Light"}</div>
-                                                    </div>
-                                                    {active ? (
-                                                        <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={e => e.stopPropagation()}>
-                                                            <button onClick={() => updateQty(catId, item.id, -1)} style={{ width: 30, height: 30, borderRadius: "50%", border: "2px solid var(--brand)", background: "none", color: "var(--brand)", fontSize: 16, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                                                            <span style={{ fontWeight: 700, fontSize: 16, color: "var(--brand)", minWidth: 20, textAlign: "center" }}>{qty}</span>
-                                                            <button onClick={() => updateQty(catId, item.id, 1)} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "var(--brand)", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
-                                                        </div>
-                                                    ) : (
-                                                        <span style={{ padding: "4px 16px", borderRadius: 20, border: "1.5px solid var(--border, #E2E8F0)", fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Add</span>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
+                            {hasEdgeCase && (
+                                <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFFBEB", borderRadius: 10, border: "1px solid #FDE68A", display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#92400E", lineHeight: 1.5 }}>
+                                    <span style={{ fontSize: 16, lineHeight: "20px", flexShrink: 0 }}>⚠️</span>
+                                    <span><strong>No worries.</strong> We&apos;ll send a crew to give you a free, no-obligation estimate on-site before any work begins.</span>
                                 </div>
-                            );
-                        })}
-                        {(totalItems > 0 || totalPiles > 0) && (
-                            <div style={{ padding: "12px 18px", borderRadius: 12, background: "#FFF7ED", border: "1px solid #FFEDD5", textAlign: "center", fontWeight: 600, fontSize: 14, color: "#EA580C", marginTop: 8 }}>
-                                {selectionSummary()}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* ── JUNK VOLUME ──────────────────────────────────────────────── */}
-                {currentPhase === "junk_volume" && (
-                    <div>
-                        <div style={{ textAlign: "center", marginBottom: 32 }}>
-                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><Truck size={26} color="var(--brand)" /></div>
-                            <h1 style={{ fontSize: 26, marginBottom: 8, color: "var(--foreground)" }}>How much space will it take?</h1>
-                            <p style={{ color: "var(--muted)", fontSize: 15 }}>Estimate how much of our {pricing.truckSize} truck your junk will fill.</p>
-                        </div>
-
-                        {/* Recommendation banner */}
-                        {estimatedVolumeId && (
-                            <div style={{ padding: "12px 18px", borderRadius: 12, background: "#F0FDF4", border: "1px solid #BBF7D0", textAlign: "center", marginBottom: 20 }}>
-                                <span style={{ fontSize: 14, fontWeight: 600, color: "#16A34A" }}><BarChart3 size={14} style={{ display: "inline", verticalAlign: "middle" }} /> Based on your items, we estimate about a <strong>{VOLUME_OPTIONS.find(v => v.id === estimatedVolumeId)?.label}</strong></span>
-                            </div>
-                        )}
-
-                        <div style={{ textAlign: "center", marginBottom: 10 }}>
-                            <TruckVisual fillPercent={VOLUME_OPTIONS.find(v => v.id === volume)?.truckFill ?? 0} />
-                        </div>
-                        {/* Comparison caption under truck */}
-                        {volume && (
-                            <p style={{ textAlign: "center", fontSize: 14, fontWeight: 600, color: "var(--muted)", marginBottom: 24 }}>
-                                <Truck size={16} style={{ display: "inline", verticalAlign: "middle" }} /> {VOLUME_OPTIONS.find(v => v.id === volume)?.comparison}
-                            </p>
-                        )}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12 }}>
-                            {VOLUME_OPTIONS.map(v => {
-                                const tier = pricing.tiers.find(t => t.id === v.id);
-                                const isRecommended = v.id === estimatedVolumeId;
-                                return (
-                                    <div key={v.id} onClick={() => { setVolume(v.id); setVolumeAutoSet(true); }}
-                                        style={{
-                                            background: volume === v.id ? "#FFF7ED" : "var(--card)", border: `2px solid ${volume === v.id ? "var(--brand)" : "var(--border, #E2E8F0)"}`,
-                                            borderRadius: 14, padding: "16px 18px", textAlign: "left", cursor: "pointer", transition: "all 0.2s",
-                                            position: "relative",
-                                        }}>
-                                        {isRecommended && (
-                                            <span style={{ position: "absolute", top: -10, right: 12, background: "#16A34A", color: "#fff", fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Recommended</span>
-                                        )}
-                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                                            <span style={{ fontWeight: 700, fontSize: 15, color: "var(--foreground)" }}>{v.label}</span>
-                                            <span style={{ fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 20, background: volume === v.id ? "#FFEDD5" : "var(--border, #F1F5F9)", color: volume === v.id ? "var(--brand)" : "var(--muted)" }}>{v.fraction}</span>
-                                        </div>
-                                        <div style={{ fontSize: 12, color: "var(--muted)" }}><Truck size={12} style={{ display: "inline", verticalAlign: "middle" }} /> {v.comparison}</div>
-                                        {tier && (
-                                            <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brand)", marginTop: 8 }}>${roundTo5(tier.min)} – ${roundTo5(tier.max)}</div>
-                                        )}
-                                    </div>
-                                );
-                            })}
+                            )}
                         </div>
                     </div>
                 )}
@@ -1202,7 +1352,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 {currentPhase === "dumpster_details" && (
                     <div>
                         <div style={{ textAlign: "center", marginBottom: 32 }}>
-                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><ClipboardList size={26} color="var(--brand)" /></div>
+                            <div style={{ width: 56, height: 56, borderRadius: 16, background: "rgba(249,115,22,0.1)", border: "1px solid rgba(249,115,22,0.15)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}><FileText size={26} color="var(--brand)" /></div>
                             <h1 style={{ fontSize: 26, marginBottom: 8, color: "var(--foreground)" }}>Rental Details</h1>
                             <p style={{ color: "var(--muted)", fontSize: 15 }}>Tell us about your project so we can prepare.</p>
                         </div>
@@ -1373,7 +1523,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                         }
                                         setSignatureDataUrl(null);
                                     }} style={{ border: "none", background: "none", fontSize: 13, color: "#DC2626", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit" }}>
-                                        <Trash2 size={14} /> Clear
+                                        ✕ Clear
                                     </button>
                                 )}
                             </div>
@@ -1575,8 +1725,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                     ];
                                     if (serviceType === "junk" || serviceType === "both") {
                                         rows.push(
-                                            { label: "Junk Types", value: selectedCategories.map(c => JUNK_CATEGORIES.find(x => x.id === c)?.label || c).join(", ") },
-                                            { label: "Details", value: selectionSummary() },
+                                            { label: "Load Size", value: `${LOAD_TIERS[tierIndex].label} — ${LOAD_TIERS[tierIndex].title}` },
+                                            ...(hasEdgeCase ? [{ label: "Conditions", value: EDGE_CASES.filter(ec => edgeCases[ec.id]).map(ec => ec.label).join(", ") }] : []),
                                             { label: "Truck Load", value: tierData?.label || "—" },
                                             { label: "Location", value: LOCATION_OPTIONS.find(l => l.id === location)?.label || "—" },
                                         );
