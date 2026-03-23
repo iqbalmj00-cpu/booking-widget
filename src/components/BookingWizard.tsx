@@ -298,8 +298,8 @@ function CompareGrid({ currentStep, onChange, pricing }: { currentStep: number; 
                             {t.label}
                         </div>
                         <div style={{ fontSize:9.5, color:"var(--muted)", marginTop:3, lineHeight:1.3, minHeight:28 }}>{t.title}</div>
-                        <div style={{ fontFamily:"var(--heading-font)", fontSize:16, fontWeight:800, color:"var(--foreground)", marginTop:6 }}>
-                            {priceTier ? `$${roundTo5(priceTier.min)}` : "—"}
+                        <div style={{ fontFamily:"var(--heading-font)", fontSize:13, fontWeight:800, color:"var(--foreground)", marginTop:6, letterSpacing:-0.3 }}>
+                            {priceTier ? `$${roundTo5(priceTier.min)} – $${roundTo5(priceTier.max)}` : "—"}
                         </div>
                         <div style={{ fontSize:9, color:"var(--muted)", marginTop:2 }}>{t.bags}</div>
                         <div style={{
