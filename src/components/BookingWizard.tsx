@@ -1201,9 +1201,13 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                             <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)" }}>Estimate</div>
                                         </div>
                                     ) : (
-                                        <div style={{ background: "rgba(var(--brand-rgb, 249,115,22),0.05)", borderRadius: 10, padding: "8px 12px" }}>
-                                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 500, marginBottom: 1 }}>Starting from</div>
-                                            {tierData && <AnimatedPrice value={roundTo5(tierData.min + totalAdj)} fontSize={22} />}
+                                        <div style={{ background: "rgba(var(--brand-rgb, 249,115,22),0.05)", borderRadius: 10, padding: "8px 12px", textAlign: "center" }}>
+                                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 500, marginBottom: 2 }}>Estimated Range</div>
+                                            {tierData && (
+                                                <div style={{ fontFamily: "var(--heading-font)", fontSize: 18, fontWeight: 800, color: "var(--foreground)", letterSpacing: -0.5, lineHeight: 1.2 }}>
+                                                    ${roundTo5(tierData.min + totalAdj)} – ${roundTo5(tierData.max + totalAdj)}
+                                                </div>
+                                            )}
                                             <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3, lineHeight: 1.2 }}>Finalized on-site</div>
                                         </div>
                                     )}
