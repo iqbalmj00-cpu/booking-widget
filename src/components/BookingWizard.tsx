@@ -782,7 +782,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 const stairsAccessLabel = locationOption?.label || "Ground Floor";
 
                 const payload: Record<string, unknown> = {
-                    status: "booked", serviceType: "junk_removal",
+                    type: "booking", status: "booked", serviceType: "junk_removal",
                     name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
                     value: hasEdgeCase ? undefined : (minPrice || undefined), notes: contact.notes || "",
@@ -842,7 +842,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 const description = `${containerLabel} dumpster, ${debrisLabel}, ${durationLabel}`;
 
                 const payload: Record<string, unknown> = {
-                    status: "new",
+                    type: "rental_lead", status: "new",
                     serviceType: "dumpster_rental",
                     name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
