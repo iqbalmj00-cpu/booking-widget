@@ -1231,7 +1231,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                 <path d="M7 10.5L9 12.5L13 8" stroke="#16a34a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                             <span style={{ fontSize: 12.5, color: "#15803d", lineHeight: 1.4 }}>
-                                <strong>Pay-less guarantee:</strong> If we haul less than estimated, your price goes down. Never up.
+                                <strong>You only pay for what we haul!</strong> This is just an estimate we provide you and final price is finalized on-site.
                             </span>
                         </div>
 
