@@ -127,16 +127,17 @@ export type LoadTier = {
     bags: string;
     cuYd: number;
     fill: number;
+    vehicle: "pickup" | "boxtruck";
     popular?: boolean;
 };
 
 export const LOAD_TIERS: LoadTier[] = [
-    { volumeId: "few",           label: "⅛ Load",    title: "1–2 Large Items",          desc: "A fridge and a couch, or about 10 trash bags",                                bags: "~10 bags",  cuYd: 2,  fill: 0.125 },
-    { volumeId: "quarter",       label: "¼ Load",    title: "Pickup Truck Load",        desc: "Level with the bed of a standard F-150, or about 25–30 trash bags",              bags: "~30 bags",  cuYd: 5,  fill: 0.25, popular: true },
-    { volumeId: "half",          label: "½ Load",    title: "Small 1-Car Garage",        desc: "Roughly 1 parking space worth of junk, or about 40–50 trash bags",                bags: "~50 bags",  cuYd: 8,  fill: 0.50 },
-    { volumeId: "three_quarter", label: "¾ Load",    title: "Large 1-Car Garage",        desc: "A 1-car garage filled waist-high, or about 60–75 trash bags",                     bags: "~75 bags",  cuYd: 12, fill: 0.75 },
-    { volumeId: "full",          label: "Full Load", title: "Full Truck Load",           desc: "A 2-car garage filled waist-high, or about 80–100 trash bags",                    bags: "~100 bags", cuYd: 16, fill: 1.0 },
-    { volumeId: "multi",         label: "1+ Loads",  title: "Multi-Load / Full House",   desc: "Estate cleanout, hoarder job — may require multiple trips. 100+ trash bags.",     bags: "100+ bags", cuYd: 20, fill: 1.0 },
+    { volumeId: "few",           label: "⅛ Load",    title: "1–2 Large Items",          desc: "A fridge and a couch, or about 10 trash bags",                                bags: "~10 bags",  cuYd: 2,  fill: 0.125, vehicle: "pickup" },
+    { volumeId: "quarter",       label: "¼ Load",    title: "Pickup Truck Load",        desc: "Level with the bed of a standard F-150, or about 25–30 trash bags",              bags: "~30 bags",  cuYd: 5,  fill: 0.25, vehicle: "pickup", popular: true },
+    { volumeId: "half",          label: "½ Load",    title: "Small 1-Car Garage",        desc: "Roughly 1 parking space worth of junk, or about 40–50 trash bags",                bags: "~50 bags",  cuYd: 8,  fill: 0.50, vehicle: "boxtruck" },
+    { volumeId: "three_quarter", label: "¾ Load",    title: "Large 1-Car Garage",        desc: "A 1-car garage filled waist-high, or about 60–75 trash bags",                     bags: "~75 bags",  cuYd: 12, fill: 0.75, vehicle: "boxtruck" },
+    { volumeId: "full",          label: "Full Load", title: "Full Truck Load",           desc: "A 2-car garage filled waist-high, or about 80–100 trash bags",                    bags: "~100 bags", cuYd: 16, fill: 1.0, vehicle: "boxtruck" },
+    { volumeId: "multi",         label: "1+ Loads",  title: "Multi-Load / Full House",   desc: "Estate cleanout, hoarder job — may require multiple trips. 100+ trash bags.",     bags: "100+ bags", cuYd: 20, fill: 1.0, vehicle: "boxtruck" },
 ];
 
 export type EdgeCase = { id: string; label: string; detail: string };
