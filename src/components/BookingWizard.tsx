@@ -811,10 +811,13 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
 
-                // Confirm card-on-file with dashboard (non-blocking)
+                // Confirm card-on-file with dashboard
                 if (pmId && data.customerId) {
-                    widgetApi.confirmCard(data.customerId, pmId, apiOpts)
-                        .catch(err => console.warn("Card confirmation failed:", err));
+                    try {
+                        await widgetApi.confirmCard(data.customerId, pmId, apiOpts);
+                    } catch (err) {
+                        console.warn("Card confirmation failed:", err);
+                    }
                 }
 
                 return quoteRangeStr;
@@ -864,10 +867,13 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
 
-                // Confirm card-on-file with dashboard (non-blocking)
+                // Confirm card-on-file with dashboard
                 if (pmId && data.customerId) {
-                    widgetApi.confirmCard(data.customerId, pmId, apiOpts)
-                        .catch(err => console.warn("Card confirmation failed:", err));
+                    try {
+                        await widgetApi.confirmCard(data.customerId, pmId, apiOpts);
+                    } catch (err) {
+                        console.warn("Card confirmation failed:", err);
+                    }
                 }
 
                 return { autoBooked: data.autoBooked };
