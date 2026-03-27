@@ -20,6 +20,7 @@ export type BookingCompleteData = {
     name: string; date: string; time: string; price: string;
     serviceType: string; address?: string; dumpsterPrice?: string;
     debrisType?: string; rentalDuration?: string; autoBooked?: boolean;
+    dumpsterError?: string;
 };
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
@@ -757,9 +758,10 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             const sendJunkBooking = async () => {
                 const loadTier = LOAD_TIERS[tierIndex];
                 const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
-                const description = isOnSiteEstimate
+                const baseDescription = isOnSiteEstimate
                     ? `${loadTier.title} — on-site estimate (${edgeCaseIds.join(", ")})`
                     : `${loadTier.title} junk removal${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`;
+                const description = contact.notes ? `${baseDescription}\n\nNotes: ${contact.notes}` : baseDescription;
                 const volumeOption = VOLUME_OPTIONS.find(v => v.id === volume);
                 const locationOption = LOCATION_OPTIONS.find(l => l.id === location);
                 const minPrice = tierData ? roundTo5(tierData.min + totalAdj) : 0;
@@ -828,7 +830,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                 const containerLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || containerSize || "";
                 const debrisLabel = DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType || "";
                 const durationLabel = RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration || "";
-                const description = `${containerLabel} dumpster, ${debrisLabel}, ${durationLabel}`;
+                const baseDescription = `${containerLabel} dumpster, ${debrisLabel}, ${durationLabel}`;
+                const description = contact.notes ? `${baseDescription}\n\nNotes: ${contact.notes}` : baseDescription;
 
                 const payload: Record<string, unknown> = {
                     type: "rental_lead", status: "new",
@@ -898,19 +901,29 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             let priceStr = "";
             let dumpsterPriceStr = "";
             let dumpsterAutoBooked = false;
+            let dumpsterError = "";
             const waiverPromise = sendWaiver(); // fire in parallel
             if (serviceType === "junk" || serviceType === "both") {
                 priceStr = await sendJunkBooking();
             }
             if (serviceType === "dumpster" || serviceType === "both") {
-                const dumpsterResult = await sendDumpsterLead();
-                dumpsterAutoBooked = !!dumpsterResult.autoBooked;
-                // Build dumpster price string from pricing tiers
-                const sizeNum = containerSize ? parseInt(containerSize) : 0;
-                const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
-                if (dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0))) {
-                    const sizeLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "";
-                    dumpsterPriceStr = `${sizeLabel} — ${formatDumpsterPrice(dTier)}`;
+                try {
+                    const dumpsterResult = await sendDumpsterLead();
+                    dumpsterAutoBooked = !!dumpsterResult.autoBooked;
+                    // Build dumpster price string from pricing tiers
+                    const sizeNum = containerSize ? parseInt(containerSize) : 0;
+                    const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
+                    if (dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0))) {
+                        const sizeLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "";
+                        dumpsterPriceStr = `${sizeLabel} — ${formatDumpsterPrice(dTier)}`;
+                    }
+                } catch (dumpErr) {
+                    if (serviceType === "both") {
+                        // Junk already succeeded — capture error, don't rethrow
+                        dumpsterError = dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
+                    } else {
+                        throw dumpErr; // dumpster-only — rethrow to outer catch
+                    }
                 }
             }
             await waiverPromise; // ensure waiver completes before redirect
@@ -929,6 +942,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                     debrisType: debrisType ? (DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType) : undefined,
                     rentalDuration: rentalDuration ? (RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration) : undefined,
                     autoBooked: dumpsterAutoBooked || undefined,
+                    dumpsterError: dumpsterError || undefined,
                 });
             }
         } catch (err: unknown) {
