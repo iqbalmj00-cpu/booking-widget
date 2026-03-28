@@ -262,7 +262,7 @@ function StepSlider({ value, onChange }: { value: number; onChange: (v: number) 
             <div style={{ display:"flex", justifyContent:"space-between" }}>
                 {LOAD_TIERS.map((t,i)=>(
                     <span key={i} style={{
-                        fontSize:9.5, fontWeight:i===value?700:500,
+                        fontSize:12, fontWeight:i===value?700:500,
                         color:i===value?"var(--brand)":"var(--muted, #b0b8c4)",
                         fontFamily:"var(--heading-font)",
                         textAlign:"center", flex:1, transition:"all 0.2s",
@@ -667,7 +667,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     const toggleEdge = (id: string) =>
         setEdgeCases(prev => ({ ...prev, [id]: !prev[id] }));
 
-    const isOnSiteEstimate = !!edgeCases["unknown"];
+    const isOnSiteEstimate = !!edgeCases["unknown"] || volume === "multi";
     const hasSpecialConditions = Object.values(edgeCases).some(Boolean);
 
     /* ── Sync tierIndex → volume ── */
@@ -1198,42 +1198,39 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                         )}
 
                         {/* Info Card with client pricing */}
-                        <div style={{ margin: "20px 12px 0", padding: "18px 20px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
-                            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-                                <div style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 12, background: "rgba(var(--brand-rgb, 249,115,22),0.05)", position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${Math.min(LOAD_TIERS[tierIndex].fill, 1) * 100}%`, background: "rgba(var(--brand-rgb, 249,115,22),0.1)", transition: "height 0.4s cubic-bezier(0.16,1,0.3,1)" }} />
-                                    <Truck size={20} color="var(--brand)" style={{ position: "relative", zIndex: 1 }} />
+                        <div style={{ margin: "20px 12px 0", padding: "20px 20px 16px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                            {/* Title row */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                                <div style={{ flexShrink: 0, width: 36, height: 36, borderRadius: 10, background: "rgba(var(--brand-rgb, 249,115,22),0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <Truck size={18} color="var(--brand)" />
                                 </div>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontFamily: "var(--heading-font)", fontSize: 17, fontWeight: 700, color: "var(--foreground)", marginBottom: 3, lineHeight: 1.3 }}>
-                                        {LOAD_TIERS[tierIndex].title}
-                                        {LOAD_TIERS[tierIndex].popular && (
-                                            <span style={{ fontSize: 10, fontWeight: 700, color: "var(--brand)", background: "rgba(var(--brand-rgb, 249,115,22),0.06)", padding: "2px 8px", borderRadius: 999, marginLeft: 8, verticalAlign: "middle", letterSpacing: 0.3, textTransform: "uppercase" }}>
-                                                Most common
-                                            </span>
-                                        )}
-                                    </div>
-                                    <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.55 }}>{LOAD_TIERS[tierIndex].desc}</p>
-                                </div>
-                                <div style={{ flexShrink: 0, textAlign: "right" }}>
-                                    {isOnSiteEstimate ? (
-                                        <div style={{ background: "rgba(var(--foreground-rgb, 0,0,0),0.04)", borderRadius: 10, padding: "8px 12px" }}>
-                                            <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.3, whiteSpace: "nowrap" }}>Free On-Site</div>
-                                            <div style={{ fontFamily: "var(--heading-font)", fontSize: 11, fontWeight: 700, color: "var(--foreground)" }}>Estimate</div>
-                                        </div>
-                                    ) : (
-                                        <div style={{ background: "rgba(var(--brand-rgb, 249,115,22),0.05)", borderRadius: 10, padding: "8px 12px", textAlign: "center" }}>
-                                            <div style={{ fontSize: 9, color: "var(--muted)", fontWeight: 500, marginBottom: 2 }}>Estimated Range</div>
-                                            {tierData && (
-                                                <div style={{ fontFamily: "var(--heading-font)", fontSize: 18, fontWeight: 800, color: "var(--foreground)", letterSpacing: -0.5, lineHeight: 1.2 }}>
-                                                    ${roundTo5(tierData.min + totalAdj)} – ${roundTo5(tierData.max + totalAdj)}
-                                                </div>
-                                            )}
-                                            <div style={{ fontSize: 9, color: "var(--muted)", marginTop: 3, lineHeight: 1.2 }}>Finalized on-site</div>
-                                        </div>
+                                <div style={{ fontFamily: "var(--heading-font)", fontSize: 18, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.2 }}>
+                                    {LOAD_TIERS[tierIndex].title}
+                                    {LOAD_TIERS[tierIndex].popular && (
+                                        <span style={{ fontSize: 9, fontWeight: 700, color: "var(--brand)", background: "rgba(var(--brand-rgb, 249,115,22),0.06)", padding: "2px 6px", borderRadius: 999, marginLeft: 8, verticalAlign: "middle", letterSpacing: 0.3, textTransform: "uppercase" }}>
+                                            Most common
+                                        </span>
                                     )}
                                 </div>
                             </div>
+                            {/* Description */}
+                            <p style={{ fontSize: 13, color: "var(--muted)", margin: "0 0 14px", lineHeight: 1.55, paddingLeft: 48 }}>{LOAD_TIERS[tierIndex].desc}</p>
+                            {/* Price strip */}
+                            {isOnSiteEstimate ? (
+                                <div style={{ padding: "12px 16px", background: "rgba(var(--foreground-rgb, 0,0,0),0.03)", borderRadius: 10, textAlign: "center" }}>
+                                    <span style={{ fontFamily: "var(--heading-font)", fontSize: 14, fontWeight: 700, color: "var(--foreground)" }}>Free On-Site Estimate</span>
+                                </div>
+                            ) : (
+                                <div style={{ padding: "12px 16px", background: "linear-gradient(135deg, rgba(var(--brand-rgb, 249,115,22),0.06) 0%, rgba(var(--brand-rgb, 249,115,22),0.02) 100%)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                    <span style={{ fontSize: 11, color: "var(--muted)", fontWeight: 500 }}>Estimated Range</span>
+                                    {tierData && (
+                                        <span style={{ fontFamily: "var(--heading-font)", fontSize: 22, fontWeight: 800, color: "var(--foreground)", letterSpacing: -0.5 }}>
+                                            ${roundTo5(tierData.min + totalAdj)} – ${roundTo5(tierData.max + totalAdj)}
+                                        </span>
+                                    )}
+                                    <span style={{ fontSize: 10, color: "var(--muted)", fontWeight: 500 }}>Finalized on-site</span>
+                                </div>
+                            )}
                             <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border, #f1f5f9)", fontSize: 12.5, color: "var(--muted)", lineHeight: 1.6, display: "flex", gap: 6 }}>
                                 <span style={{ fontSize: 14, lineHeight: "18px", flexShrink: 0 }}>💡</span>
                                 <span>This is an estimate based on load size. <strong style={{ color: "var(--foreground)" }}>Your crew will confirm the final price on-site before any work begins.</strong> You only pay for what we actually haul.</span>
