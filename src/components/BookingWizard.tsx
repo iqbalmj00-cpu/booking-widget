@@ -385,7 +385,7 @@ function Calendar({ selected, onSelect, isDisabled }: { selected: Date | null; o
                     <button key={day} onClick={() => !isUnavailable(day) && onSelect(new Date(viewYear, viewMonth, day))}
                         style={{
                             width: 38, height: 38, borderRadius: "50%", border: "none", fontSize: 14, fontWeight: 600, cursor: isUnavailable(day) ? "default" : "pointer",
-                            background: isSame(selected, day) ? "var(--brand)" : isClosed(day) ? "repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(203,213,225,0.3) 3px, rgba(203,213,225,0.3) 6px)" : "transparent",
+                            background: isSame(selected, day) ? "var(--brand)" : isUnavailable(day) ? "repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(203,213,225,0.3) 3px, rgba(203,213,225,0.3) 6px)" : "transparent",
                             color: isSame(selected, day) ? "#fff" : isUnavailable(day) ? "#CBD5E1" : "var(--foreground)",
                             transition: "all 0.15s", margin: "0 auto", fontFamily: "inherit",
                         }}>
@@ -678,6 +678,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     const pricing = config.pricing;
     const tierData = pricing.tiers.find(t => t.id === volume);
     const stairsSurcharge = pricing.surcharges.find(s => s.id === "stairs");
+    const heavySurcharge = pricing.surcharges.find(s => s.id === "heavy_item");
     const priceAdj = (location === "upstairs" || location === "basement") && stairsSurcharge?.enabled
         ? stairsSurcharge.amount : 0;
     const totalAdj = priceAdj + distanceSurcharge;
@@ -1263,6 +1264,16 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                     <EdgeToggle item={item} checked={!!edgeCases[item.id]} onChange={() => toggleEdge(item.id)} />
                                 </div>
                             ))}
+                            {edgeCases.heavy && heavySurcharge?.enabled && (
+                                <div style={{ marginTop: 12, padding: "12px 18px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FEF3C7", fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 8 }}>
+                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Heavy or dense items may add ${heavySurcharge.amount} to the estimate due to extra labor.
+                                </div>
+                            )}
+                            {edgeCases.specialty && heavySurcharge?.enabled && (
+                                <div style={{ marginTop: 12, padding: "12px 18px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FEF3C7", fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 8 }}>
+                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Appliances and e-waste may add ${heavySurcharge.amount} to the estimate due to special handling.
+                                </div>
+                            )}
                             {isOnSiteEstimate && (
                                 <div style={{ marginTop: 12, padding: "10px 14px", background: "#FFFBEB", borderRadius: 10, border: "1px solid #FDE68A", display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#92400E", lineHeight: 1.5 }}>
                                     <span style={{ fontSize: 16, lineHeight: "20px", flexShrink: 0 }}>⚠️</span>
