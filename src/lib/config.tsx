@@ -58,6 +58,10 @@ export type WidgetConfig = {
     googleMapsKey: string;
     stripePublishableKey: string;
 
+    // Legal URLs (from dashboard config or embed data-attributes)
+    privacyUrl: string;
+    termsUrl: string;
+
     // API (set by main.tsx, not from dashboard)
     widgetApiUrl: string;
     siteToken: string;

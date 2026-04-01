@@ -57,6 +57,8 @@ async function boot() {
             pricing: serverConfig.pricing || { tiers: [], surcharges: [] },
             dumpsterPricing: serverConfig.dumpsterPricing || null,
             businessHours: serverConfig.businessHours || {},
+            privacyUrl: serverConfig.privacyUrl || el.dataset.privacyUrl || "",
+            termsUrl: serverConfig.termsUrl || el.dataset.termsUrl || "",
         };
 
         // 4. Apply brand color as CSS custom property
