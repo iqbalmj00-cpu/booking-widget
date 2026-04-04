@@ -1816,7 +1816,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                             style={{
                                                 padding: "16px 14px", borderRadius: 14, cursor: "pointer", textAlign: "center", fontFamily: "inherit",
                                                 border: paymentPreference === opt.id ? "2px solid var(--brand)" : "1.5px solid var(--border, #E2E8F0)",
-                                                background: paymentPreference === opt.id ? "var(--hero-bg, #F8FAFC)" : "var(--card)",
+                                                background: paymentPreference === opt.id ? "rgba(var(--brand-rgb, 249,115,22), 0.08)" : "var(--card)",
                                                 transition: "all 0.2s",
                                             }}>
                                             <div style={{ fontSize: 28, marginBottom: 6 }}>{opt.icon}</div>
