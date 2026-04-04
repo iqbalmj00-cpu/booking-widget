@@ -21,7 +21,7 @@ export default function Widget({ config }: { config: WidgetConfig }) {
                         Booking Confirmed!
                     </h2>
                     <p style={{ color: "var(--muted)", fontSize: 15, lineHeight: 1.6, marginBottom: 24 }}>
-                        Thank you, <strong>{completed.name}</strong>! Your {completed.serviceType === "dumpster" ? "dumpster rental" : "junk removal"} is scheduled
+                        Thank you, <strong>{completed.name}</strong>! Your {completed.serviceType === "both" ? "junk removal and dumpster rental" : completed.serviceType === "dumpster" ? "dumpster rental" : "junk removal"} is scheduled
                         for <strong>{completed.date}</strong> during the <strong>{completed.time}</strong> window.
                     </p>
                     {completed.price && (
@@ -32,6 +32,11 @@ export default function Widget({ config }: { config: WidgetConfig }) {
                     )}
                     {completed.address && (
                         <p style={{ fontSize: 13, color: "var(--muted)" }}>📍 {completed.address}</p>
+                    )}
+                    {completed.dumpsterError && (
+                        <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
+                            Our team will follow up about your dumpster rental request shortly.
+                        </p>
                     )}
                     <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 16 }}>
                         We&apos;ll send you a confirmation via text and email shortly.

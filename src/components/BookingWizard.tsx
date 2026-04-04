@@ -1719,9 +1719,20 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                         </div>
                                         {dHasPrice ? (
                                             <>
-                                                <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: serviceType === "dumpster" ? "var(--hero-text)" : "#92400E" }}>
-                                                    {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
-                                                </div>
+                                                {promoResult?.valid ? (
+                                                    <>
+                                                        <div style={{ fontSize: serviceType === "dumpster" ? 18 : 16, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", textDecoration: "line-through" }}>
+                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                        </div>
+                                                        <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: "#10B981" }}>
+                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — ${applyDiscount(roundTo5(dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${applyDiscount(roundTo5(dTier.baseRateMax))}` : ""}
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: serviceType === "dumpster" ? "var(--hero-text)" : "#92400E" }}>
+                                                        {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                    </div>
+                                                )}
                                                 <div style={{ fontSize: 12, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", marginTop: 4 }}>
                                                     {dTier.includedDays}-day rental · {dTier.weightAllowanceTons} tons included · ${dTier.overageRatePerTon}/ton overage{dTier.extendedDailyRate ? ` · $${dTier.extendedDailyRate}/day extended` : ""}
                                                 </div>
