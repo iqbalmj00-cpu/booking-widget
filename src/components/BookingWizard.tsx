@@ -689,7 +689,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
             case "contact": {
                 const hasRequired = !!(contact.name && contact.phone && contact.email && contact.address);
                 const areaOk = addressConfirmed && addressInArea && !outOfAreaMsg;
-                return hasRequired && areaOk;
+                const emailOk = emailValidation.valid;
+                return hasRequired && areaOk && emailOk;
             }
             case "service_type": return serviceType !== null;
             case "load_estimate": return volume !== null;
@@ -969,7 +970,51 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
     };
 
+    const VALID_EMAIL_DOMAINS = [
+        "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
+        "icloud.com", "me.com", "mac.com", "live.com", "msn.com",
+        "protonmail.com", "zoho.com", "yandex.com", "mail.com",
+        "comcast.net", "att.net", "sbcglobal.net", "verizon.net",
+        "cox.net", "charter.net", "earthlink.net",
+    ];
 
+    const TYPO_CORRECTIONS: Record<string, string> = {
+        "gmial.com": "gmail.com", "gmal.com": "gmail.com", "gmai.com": "gmail.com",
+        "gmil.com": "gmail.com", "gmail.co": "gmail.com", "gamil.com": "gmail.com",
+        "gnail.com": "gmail.com", "gmaill.com": "gmail.com",
+        "yaho.com": "yahoo.com", "yahooo.com": "yahoo.com", "yhaoo.com": "yahoo.com",
+        "yahoo.co": "yahoo.com",
+        "hotmal.com": "hotmail.com", "hotmial.com": "hotmail.com", "hotmai.com": "hotmail.com",
+        "hotmail.co": "hotmail.com",
+        "outllok.com": "outlook.com", "outlok.com": "outlook.com", "outloo.com": "outlook.com",
+        "outlook.co": "outlook.com",
+        "iclould.com": "icloud.com", "icloud.co": "icloud.com",
+    };
+
+    const validateEmail = (email: string): { valid: boolean; error: string; suggestion?: string } => {
+        if (!email) return { valid: false, error: "" };
+        const trimmed = email.trim().toLowerCase();
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+        if (!emailRegex.test(trimmed)) return { valid: false, error: "Please enter a valid email address." };
+
+        const domain = trimmed.split("@")[1];
+
+        if (TYPO_CORRECTIONS[domain]) {
+            return { valid: false, error: `Did you mean ${trimmed.split("@")[0]}@${TYPO_CORRECTIONS[domain]}?`, suggestion: `${trimmed.split("@")[0]}@${TYPO_CORRECTIONS[domain]}` };
+        }
+
+        const tldParts = domain.split(".");
+        const tld = tldParts[tldParts.length - 1];
+        if (tld.length < 2 || /^\d+$/.test(tld)) return { valid: false, error: "That email domain doesn't look right. Please double-check." };
+
+        const fakeDomains = ["test.com", "fake.com", "asdf.com", "example.com", "none.com", "na.com", "noemail.com", "email.com"];
+        if (fakeDomains.includes(domain)) return { valid: false, error: "Please enter your real email address." };
+
+        return { valid: true, error: "" };
+    };
+
+    const emailValidation = validateEmail(contact.email);
 
     /* ── Render ──────────────────────────────────────────────────────────── */
     return (
@@ -1024,7 +1069,24 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                                 </div>
                                 <div>
                                     <label className="label">Email *</label>
-                                    <input className="input" type="email" placeholder="john@email.com" value={contact.email} onChange={e => setContact(c => ({ ...c, email: e.target.value }))} />
+                                    <input className="input" type="email" placeholder="john@gmail.com" value={contact.email}
+                                        style={contact.email && !emailValidation.valid && emailValidation.error ? { borderColor: "#DC2626" } : undefined}
+                                        onChange={e => setContact(c => ({ ...c, email: e.target.value }))} />
+                                    {contact.email && !emailValidation.valid && emailValidation.error && (
+                                        <p style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>
+                                            {emailValidation.suggestion ? (
+                                                <>
+                                                    {emailValidation.error.split(emailValidation.suggestion)[0]}
+                                                    <button
+                                                        onClick={() => setContact(c => ({ ...c, email: emailValidation.suggestion! }))}
+                                                        style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", padding: 0, fontSize: 12, fontFamily: "inherit", textDecoration: "underline" }}
+                                                    >
+                                                        {emailValidation.suggestion}
+                                                    </button>?
+                                                </>
+                                            ) : emailValidation.error}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             <div>
