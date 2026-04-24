@@ -676,10 +676,19 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
     const pricing = config.pricing;
     const tierData = pricing.tiers.find(t => t.id === volume);
     const stairsSurcharge = pricing.surcharges.find(s => s.id === "stairs");
-    const heavySurcharge = pricing.surcharges.find(s => s.id === "heavy_item");
+    const heavySurcharge = pricing.surcharges.find(s => s.id === "heavy_material");
+    const applianceSurcharge = pricing.surcharges.find(s => s.id === "appliance");
     const priceAdj = (location === "upstairs" || location === "basement") && stairsSurcharge?.enabled
         ? stairsSurcharge.amount : 0;
-    const totalAdj = priceAdj + distanceSurcharge;
+    // Heavy Material scales with load size: amountsByTier[tierIndex] when present, else flat amount.
+    const heavyAmount = (edgeCases.heavy && heavySurcharge?.enabled)
+        ? (heavySurcharge.amountsByTier?.[tierIndex] ?? heavySurcharge.amount)
+        : 0;
+    // Appliance is flat — never scales by tier.
+    const applianceAmount = (edgeCases.specialty && applianceSurcharge?.enabled)
+        ? applianceSurcharge.amount
+        : 0;
+    const totalAdj = priceAdj + distanceSurcharge + heavyAmount + applianceAmount;
 
     const canProceed = () => {
         switch (currentPhase) {
@@ -795,6 +804,8 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                         surcharges: [
                             ...(priceAdj > 0 ? [{ id: "stairs", label: stairsSurcharge?.label, amount: priceAdj }] : []),
                             ...(distanceSurcharge > 0 ? [{ id: "distance", label: "Distance surcharge", amount: distanceSurcharge }] : []),
+                            ...(heavyAmount > 0 ? [{ id: "heavy_material", label: heavySurcharge?.label || "Heavy Material", amount: heavyAmount }] : []),
+                            ...(applianceAmount > 0 ? [{ id: "appliance", label: applianceSurcharge?.label || "Appliance", amount: applianceAmount }] : []),
                         ],
                         termsAcceptedAt: new Date().toISOString(),
                         ...(paymentPreference ? { paymentPreference } : {}),
@@ -940,7 +951,7 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
         } finally {
             setSubmitting(false);
         }
-    }, [contact, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, priceAdj, distanceSurcharge, totalAdj, stairsSurcharge, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference]);
+    }, [contact, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, priceAdj, distanceSurcharge, totalAdj, stairsSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference]);
 
     const formatPhone = (val: string) => {
         const digits = val.replace(/\D/g, "").slice(0, 10);
@@ -1325,12 +1336,12 @@ export default function BookingWizard({ onComplete, initialPromo }: { onComplete
                             ))}
                             {edgeCases.heavy && heavySurcharge?.enabled && (
                                 <div style={{ marginTop: 12, padding: "12px 18px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FEF3C7", fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 8 }}>
-                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Heavy or dense items may add ${heavySurcharge.amount} to the estimate due to extra labor.
+                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Heavy or dense items add <strong style={{ margin: "0 2px" }}>${heavyAmount}</strong> to this estimate based on your selected load size.
                                 </div>
                             )}
-                            {edgeCases.specialty && heavySurcharge?.enabled && (
+                            {edgeCases.specialty && applianceSurcharge?.enabled && (
                                 <div style={{ marginTop: 12, padding: "12px 18px", borderRadius: 12, background: "#FFFBEB", border: "1px solid #FEF3C7", fontSize: 13, color: "#92400E", display: "flex", alignItems: "center", gap: 8 }}>
-                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Appliances and e-waste may add ${heavySurcharge.amount} to the estimate due to special handling.
+                                    <AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", flexShrink: 0 }} /> Appliances and e-waste add <strong style={{ margin: "0 2px" }}>${applianceAmount}</strong> to this estimate due to special handling.
                                 </div>
                             )}
                             {isOnSiteEstimate && (

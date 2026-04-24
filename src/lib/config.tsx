@@ -8,7 +8,15 @@ import { createContext, useContext, type ReactNode } from "react";
 /* ── Pricing Types (match website-template/lib/siteConfig.ts) ──────── */
 
 export type PricingTier = { id: string; label: string; fraction: string; min: number; max: number };
-export type Surcharge = { id: string; label: string; amount: number; enabled: boolean };
+export type Surcharge = {
+    id: string;
+    label: string;
+    amount: number;
+    enabled: boolean;
+    /** Density-scaled surcharges (Heavy Material) carry one amount per tier:
+     *  [1/8, 1/4, 1/2, 3/4, Full, 1+]. If absent, use flat `amount`. */
+    amountsByTier?: number[];
+};
 export type DistanceTier = { id: string; maxMiles: number; additionalCost: number };
 export type PricingConfig = { truckSize: string; fullLoadPrice?: number; tiers: PricingTier[]; distanceTiers?: DistanceTier[]; surcharges: Surcharge[] };
 export type BusinessDayHours = { start: string; end: string; closed?: boolean };
