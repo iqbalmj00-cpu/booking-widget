@@ -16,6 +16,9 @@ export type Surcharge = {
     /** Density-scaled surcharges (Heavy Material) carry one amount per tier:
      *  [1/8, 1/4, 1/2, 3/4, Full, 1+]. If absent, use flat `amount`. */
     amountsByTier?: number[];
+    /** Access surcharges carry one amount per LOCATION_OPTIONS id
+     *  (curbside, garage, ground_floor, upstairs, basement, backyard). */
+    amountsByLocation?: Record<string, number>;
 };
 export type DistanceTier = { id: string; maxMiles: number; additionalCost: number };
 export type PricingConfig = { truckSize: string; fullLoadPrice?: number; tiers: PricingTier[]; distanceTiers?: DistanceTier[]; surcharges: Surcharge[] };

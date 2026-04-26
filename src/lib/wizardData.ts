@@ -189,13 +189,12 @@ export type WizardPhase =
     | "contact"
     | "service_type"
     | "load_estimate"
-    | "junk_location"
     | "dumpster_size"
     | "dumpster_details"
     | "schedule"
     | "quote";
 
-const JUNK_PHASES: WizardPhase[] = ["load_estimate", "junk_location"];
+const JUNK_PHASES: WizardPhase[] = ["load_estimate"];
 const DUMPSTER_PHASES: WizardPhase[] = ["dumpster_size", "dumpster_details"];
 const CLOSING_PHASES: WizardPhase[] = ["schedule", "quote"];
 
@@ -214,8 +213,7 @@ export function getPhases(serviceType: ServiceType | null, offersDumpster: boole
 const PHASE_LABELS: Record<WizardPhase, string> = {
     contact: "Your Info",
     service_type: "Service Type",
-    load_estimate: "Load Estimate",
-    junk_location: "Location",
+    load_estimate: "Load & Access",
     dumpster_size: "Container Size",
     dumpster_details: "Rental Details",
     schedule: "Schedule",
