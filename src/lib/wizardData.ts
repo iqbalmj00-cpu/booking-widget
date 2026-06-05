@@ -100,12 +100,12 @@ export const CATEGORY_ITEMS: Record<string, JunkItem[]> = {
 };
 
 export const VOLUME_OPTIONS: VolumeOption[] = [
-    { id: "few", label: "A Few Items", fraction: "1/8", desc: "A few small items — fits in a pickup bed", truckFill: 0.125, comparison: "About half a pickup truck bed" },
-    { id: "quarter", label: "Quarter Load", fraction: "1/4", desc: "Small pile — a corner of the truck", truckFill: 0.25, comparison: "About 1 pickup truck bed" },
-    { id: "half", label: "Half Load", fraction: "1/2", desc: "Medium pile — half the truck bed", truckFill: 0.5, comparison: "About 2 pickup truck beds" },
-    { id: "three_quarter", label: "3/4 Load", fraction: "3/4", desc: "Large pile — most of the truck", truckFill: 0.75, comparison: "About 3 pickup truck beds" },
-    { id: "full", label: "Full Load", fraction: "1", desc: "Filling the entire truck", truckFill: 1.0, comparison: "About 4 pickup truck beds" },
-    { id: "multi", label: "Multiple Loads", fraction: "1+", desc: "More than one full truck load", truckFill: 1.25, comparison: "More than 4 pickup truck beds" },
+    { id: "few", label: "1/8 Load", fraction: "1/8", desc: "A washer, dryer, refrigerator, mattress set, or 6-8 large boxes", truckFill: 0.125, comparison: "About 50.6 cu ft" },
+    { id: "quarter", label: "Quarter Load", fraction: "1/4", desc: "A sofa and armchair, or a small dining set with a few boxes", truckFill: 0.25, comparison: "About 101.3 cu ft" },
+    { id: "half", label: "Half Load", fraction: "1/2", desc: "A bedroom set plus 10-15 boxes or bags", truckFill: 0.5, comparison: "About 202.5 cu ft" },
+    { id: "three_quarter", label: "3/4 Load", fraction: "3/4", desc: "A bedroom set plus a living room group with boxes", truckFill: 0.75, comparison: "About 303.8 cu ft" },
+    { id: "full", label: "Full Load", fraction: "1", desc: "A typical packed single-car garage cleanout", truckFill: 1.0, comparison: "About 405 cu ft" },
+    { id: "multi", label: "Multiple Loads", fraction: "1+", desc: "More than one full 15-yard dump-bed truck load", truckFill: 1.25, comparison: "More than a packed garage bay" },
 ];
 
 export const LOCATION_OPTIONS: LocationOption[] = [
@@ -127,17 +127,17 @@ export type LoadTier = {
     bags: string;
     cuYd: number;
     fill: number;
-    vehicle: "pickup" | "boxtruck";
+    vehicle: "pickup" | "boxtruck" | "dumpbed";
     popular?: boolean;
 };
 
 export const LOAD_TIERS: LoadTier[] = [
-    { volumeId: "few",           label: "⅛ Load",    title: "1–2 Large Items",          desc: "A fridge and a couch, or about 10 trash bags",                                bags: "~10 bags",  cuYd: 2,  fill: 0.125, vehicle: "pickup" },
-    { volumeId: "quarter",       label: "¼ Load",    title: "Pickup Truck Load",        desc: "Level with the bed of a standard F-150, or about 25–30 trash bags",              bags: "~30 bags",  cuYd: 5,  fill: 0.25, vehicle: "pickup", popular: true },
-    { volumeId: "half",          label: "½ Load",    title: "Small 1-Car Garage",        desc: "Roughly 1 parking space worth of junk, or about 40–50 trash bags",                bags: "~50 bags",  cuYd: 8,  fill: 0.50, vehicle: "boxtruck" },
-    { volumeId: "three_quarter", label: "¾ Load",    title: "Large 1-Car Garage",        desc: "A 1-car garage filled waist-high, or about 60–75 trash bags",                     bags: "~75 bags",  cuYd: 12, fill: 0.75, vehicle: "boxtruck" },
-    { volumeId: "full",          label: "Full Load", title: "Full Truck Load",           desc: "A 2-car garage filled waist-high, or about 80–100 trash bags",                    bags: "~100 bags", cuYd: 16, fill: 1.0, vehicle: "boxtruck" },
-    { volumeId: "multi",         label: "1+ Loads",  title: "Multi-Load / Full House",   desc: "Estate cleanout, hoarder job — may require multiple trips. 100+ trash bags.",     bags: "100+ bags", cuYd: 20, fill: 1.0, vehicle: "boxtruck" },
+    { volumeId: "few",           label: "1/8 Load",  title: "Single Large Appliance",       desc: "A washer, dryer, refrigerator, mattress set, or 6-8 large boxes.",                 bags: "~10 bags",  cuYd: 1.875, fill: 0.125, vehicle: "dumpbed" },
+    { volumeId: "quarter",       label: "1/4 Load",  title: "Sofa + Armchair",              desc: "A sofa and armchair, or a small dining set with a few boxes.",                     bags: "~25 bags",  cuYd: 3.75,  fill: 0.25,  vehicle: "dumpbed", popular: true },
+    { volumeId: "half",          label: "1/2 Load",  title: "Bedroom Set + Boxes",          desc: "A bedroom set plus 10-15 boxes or bags.",                                         bags: "~50 bags",  cuYd: 7.5,   fill: 0.50,  vehicle: "dumpbed" },
+    { volumeId: "three_quarter", label: "3/4 Load",  title: "Bedroom + Living Room",        desc: "A bedroom set plus a living room group with boxes.",                              bags: "~75 bags",  cuYd: 11.25, fill: 0.75,  vehicle: "dumpbed" },
+    { volumeId: "full",          label: "Full Load", title: "Garage Cleanout",              desc: "A typical packed single-car garage cleanout.",                                    bags: "~100 bags", cuYd: 15,    fill: 1.0,   vehicle: "dumpbed" },
+    { volumeId: "multi",         label: "1+ Loads",  title: "More Than One Truck",           desc: "More than one full dump-bed truck. This should be confirmed on-site.",             bags: "100+ bags", cuYd: 15,    fill: 1.0,   vehicle: "dumpbed" },
 ];
 
 export type EdgeCase = { id: string; label: string; detail: string };

@@ -1,0 +1,231 @@
+.root {
+    background: transparent;
+    color: #0f172a;
+}
+
+.panels {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    gap: 12px;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+}
+
+.panelHead {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 12px 0;
+    min-height: 48px;
+}
+
+.eyebrow {
+    margin: 0 0 3px;
+    font-size: 11px;
+    line-height: 1.15;
+    font-weight: 800;
+    color: var(--ve-brand);
+    text-transform: uppercase;
+}
+
+.title {
+    margin: 0;
+    color: #0f172a;
+    font-family: var(--heading-font);
+    font-size: 15px;
+    line-height: 1.25;
+    font-weight: 850;
+    letter-spacing: 0;
+}
+
+.visual {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    justify-content: center;
+    background: transparent;
+    overflow: visible;
+    padding: 8px 12px 4px;
+}
+
+.visualLarge {
+    padding: 0 4px 4px;
+}
+
+.truckVisual {
+    min-height: 318px;
+}
+
+.image {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    object-fit: contain;
+}
+
+.truckStage {
+    position: relative;
+    width: 110%;
+    max-width: 110%;
+    isolation: isolate;
+}
+
+.truckImage {
+    width: 100%;
+    max-width: 100%;
+}
+
+.imageLarge {
+    width: 110%;
+    max-width: 110%;
+}
+
+.dimensionOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.copy {
+    margin: auto 0 0;
+    padding: 0 12px 12px;
+    color: #475569;
+    font-size: 12.5px;
+    line-height: 1.45;
+}
+
+.controls {
+    margin-top: 12px;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
+    padding: 10px;
+}
+
+.controlHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 9px;
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.radioRow {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 7px;
+}
+
+.radio {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 48px;
+    border: 1.5px solid rgba(15, 23, 42, 0.16);
+    border-radius: 8px;
+    background: transparent;
+    color: #334155;
+    cursor: pointer;
+    font-family: inherit;
+    padding: 8px 6px;
+    text-align: center;
+}
+
+.radio[aria-checked="true"] {
+    border-color: var(--ve-brand);
+    background: rgba(var(--ve-brand-rgb), 0.1);
+    color: #0f172a;
+    box-shadow: 0 0 0 3px rgba(var(--ve-brand-rgb), 0.16);
+}
+
+.radio:focus-visible {
+    outline: 3px solid rgba(var(--ve-brand-rgb), 0.35);
+    outline-offset: 2px;
+}
+
+.radio strong {
+    display: block;
+    font-size: 12px;
+    line-height: 1.1;
+}
+
+@media (max-width: 760px) {
+    .panels {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 430px) {
+    .panelHead {
+        padding: 10px 10px 0;
+    }
+
+    .visual {
+        padding-inline: 8px;
+    }
+
+    .visualLarge {
+        padding-inline: 2px;
+    }
+
+    .truckVisual {
+        min-height: 280px;
+    }
+
+    .truckStage {
+        width: 106%;
+        max-width: 106%;
+    }
+
+    .imageLarge {
+        width: 106%;
+        max-width: 106%;
+    }
+
+    .copy {
+        padding: 0 10px 10px;
+    }
+
+    .radioRow {
+        gap: 5px;
+    }
+
+    .radio {
+        min-height: 46px;
+        padding: 8px 3px;
+    }
+
+    .radio strong {
+        font-size: 11px;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .radio {
+        transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
+    }
+
+    .radio:hover {
+        transform: translateY(-1px);
+    }
+}

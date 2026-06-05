@@ -6,14 +6,55 @@
  * Usage on the host page:
  *   <div id="syj-booking-widget"
  *        data-site-token="..."
- *        data-api-url="https://widget-api.example.com">
+ *        data-api-url="https://app.scaleyourjunk.com">
  *   </div>
- *   <script src="https://cdn.example.com/embed.js"></script>
+ *   <script src="https://app.scaleyourjunk.com/widget/embed.iife.js" defer></script>
  */
 import { createRoot } from "react-dom/client";
 import Widget from "./components/Widget";
 import type { WidgetConfig } from "./lib/config";
 import "./styles/widget.css";
+
+function currentScriptOrigin(): string {
+    const script = document.currentScript as HTMLScriptElement | null;
+    if (!script?.src) return "";
+    try {
+        return new URL(script.src).origin;
+    } catch {
+        return "";
+    }
+}
+
+function cleanOptional(value: string | null | undefined): string | undefined {
+    const clean = value?.trim();
+    return clean || undefined;
+}
+
+function resolveBookingSource(el: HTMLElement): string {
+    const explicitSource = cleanOptional(el.dataset.bookingSource) || cleanOptional(el.dataset.source);
+    if (explicitSource) return explicitSource;
+
+    const params = new URLSearchParams(window.location.search);
+    return params.get("utm_source") === "phone_agent" ? "phone_agent_sms" : "WIDGET";
+}
+
+function resolveInitialPromo(el: HTMLElement): string | undefined {
+    const explicitPromo = cleanOptional(el.dataset.promo) || cleanOptional(el.dataset.promoCode);
+    if (explicitPromo) return explicitPromo;
+
+    const params = new URLSearchParams(window.location.search);
+    return cleanOptional(params.get("promo"));
+}
+
+function hexToRgb(hex: string): string | null {
+    const clean = hex.trim().replace(/^#/, "");
+    const expanded = clean.length === 3
+        ? clean.split("").map((char) => char + char).join("")
+        : clean;
+    if (!/^[0-9a-fA-F]{6}$/.test(expanded)) return null;
+    const value = parseInt(expanded, 16);
+    return `${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}`;
+}
 
 async function boot() {
     // 1. Find the mount element
@@ -23,8 +64,10 @@ async function boot() {
         return;
     }
 
-    const siteToken = el.dataset.siteToken;
-    const apiUrl = el.dataset.apiUrl;
+    const siteToken = cleanOptional(el.dataset.siteToken) || cleanOptional(el.dataset.token);
+    const apiUrl = cleanOptional(el.dataset.apiUrl) || currentScriptOrigin();
+    const initialPromo = resolveInitialPromo(el);
+    const bookingSource = resolveBookingSource(el);
 
     if (!siteToken || !apiUrl) {
         console.error("[SYJ Widget] Missing data-site-token or data-api-url attributes.");
@@ -64,12 +107,15 @@ async function boot() {
         // 4. Apply brand color as CSS custom property
         if (config.brandColor) {
             el.style.setProperty("--brand", config.brandColor);
+            el.style.setProperty("--brand-dark", serverConfig.brandDarkColor || config.brandColor);
+            const brandRgb = hexToRgb(config.brandColor);
+            if (brandRgb) el.style.setProperty("--brand-rgb", brandRgb);
         }
 
         // 5. Mount the React widget
         el.classList.add("syj-widget-root");
         const root = createRoot(el);
-        root.render(<Widget config={config} />);
+        root.render(<Widget config={config} initialPromo={initialPromo} bookingSource={bookingSource} />);
 
     } catch (err) {
         console.error("[SYJ Widget] Failed to initialize:", err);

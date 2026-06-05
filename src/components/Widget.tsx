@@ -7,7 +7,13 @@ import { ConfigProvider, type WidgetConfig } from "../lib/config";
 import BookingWizard, { type BookingCompleteData } from "./BookingWizard";
 import { Check } from "lucide-react";
 
-export default function Widget({ config }: { config: WidgetConfig }) {
+type WidgetProps = {
+    config: WidgetConfig;
+    initialPromo?: string;
+    bookingSource?: string;
+};
+
+export default function Widget({ config, initialPromo, bookingSource }: WidgetProps) {
     const [completed, setCompleted] = useState<BookingCompleteData | null>(null);
 
     if (completed) {
@@ -48,7 +54,7 @@ export default function Widget({ config }: { config: WidgetConfig }) {
 
     return (
         <ConfigProvider config={config}>
-            <BookingWizard onComplete={setCompleted} />
+            <BookingWizard onComplete={setCompleted} initialPromo={initialPromo} bookingSource={bookingSource} />
         </ConfigProvider>
     );
 }
