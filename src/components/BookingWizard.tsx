@@ -12,7 +12,7 @@ import {
     CONTAINER_SIZES, DEBRIS_TYPES, RENTAL_DURATIONS,
     LOAD_TIERS, EDGE_CASES,
     getPhases, getPhaseLabel, isDayClosed, getAvailableTimeSlots,
-    formatSlotTime,
+    formatSlotTime, composeAddress,
     type ServiceType, type WizardPhase, type DynamicSlot,
 } from "../lib/wizardData";
 import { loadStripe, type Stripe, type StripeCardElement } from "@stripe/stripe-js";
@@ -24,8 +24,29 @@ export type BookingCompleteData = {
     dumpsterError?: string;
 };
 
+/**
+ * Thrown when the dashboard reports the chosen slot filled while we were
+ * submitting. It aborts the submit so the customer stays on the schedule step
+ * instead of falling through to a confirmation screen for a booking that was
+ * never created.
+ *
+ * The dashboard removed its `slot_full` response in March 2026, so this cannot
+ * currently fire. It stays because the alternative — falling through — tells a
+ * customer they are booked when they are not, and nothing would flag it.
+ *
+ * Keep identical to website-template/components/BookingWizard.tsx.
+ */
+class SlotFullError extends Error {}
+
 /* ── Types ───────────────────────────────────────────────────────────────────── */
-type ContactInfo = { name: string; phone: string; email: string; address: string; notes: string; customerType: "residential" | "commercial" };
+type ContactInfo = {
+    name: string; phone: string; email: string;
+    address: string;
+    /** Apartment / suite / unit. Captured separately because Google's
+     *  formattedAddress overwrites the typed value and never carries a unit. */
+    addressUnit: string;
+    notes: string; customerType: "residential" | "commercial";
+};
 
 /* ── Stripe (loaded lazily when configured) ── */
 // hasStripe determined at runtime via config context (see component body)
@@ -193,9 +214,18 @@ export default function BookingWizard({
     });
     const [dynamicSlots, setDynamicSlots] = useState<DynamicSlot[] | null>(null);
     const [loadingSlots, setLoadingSlots] = useState(false);
-    const [contact, setContact] = useState<ContactInfo>(saved?.contact ?? { name: "", phone: "", email: "", address: "", notes: "", customerType: "residential" });
+    // The spread order matters: a session saved before addressUnit existed has
+    // no such key, and an undefined value would make the input uncontrolled.
+    const [contact, setContact] = useState<ContactInfo>({
+        name: "", phone: "", email: "", address: "", addressUnit: "", notes: "", customerType: "residential",
+        ...(saved?.contact ?? {}),
+    });
     const [addressInArea, setAddressInArea] = useState(true);
     const [addressConfirmed, setAddressConfirmed] = useState(saved?.addressConfirmed ?? false);
+    /** True only when the address came from a Google suggestion. Manual entry
+     *  (Places unavailable or unconfigured) yields no ZIP and no coordinates,
+     *  so the service-area checks cannot run and the operator needs to know. */
+    const [addressVerified, setAddressVerified] = useState<boolean>(saved?.addressVerified ?? true);
     const [outOfAreaMsg, setOutOfAreaMsg] = useState<string | null>(null);
     const [distanceSurcharge, setDistanceSurcharge] = useState(saved?.distanceSurcharge ?? 0);
     const [distanceMiles, setDistanceMiles] = useState<number | null>(saved?.distanceMiles ?? null);
@@ -256,14 +286,14 @@ export default function BookingWizard({
             selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
             termsAccepted, serviceType, containerSize, debrisType,
             rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
-            addressConfirmed,
+            addressConfirmed, addressVerified,
         };
         try { sessionStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify(data)); } catch {}
     }, [step, tierIndex, edgeCases, volume, location,
         selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
         termsAccepted, serviceType, containerSize, debrisType,
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
-        addressConfirmed]);
+        addressConfirmed, addressVerified]);
 
     // Check container availability — only fires when date is selected for accurate date-aware check
     useEffect(() => {
@@ -484,6 +514,12 @@ export default function BookingWizard({
         }
     };
 
+    /* ── Service address ───────────────────────────────────────────────
+     * Everything sent to the dashboard uses this, never `contact.address`
+     * on its own — otherwise the apartment number the customer typed is
+     * dropped and the crew turns up at the building with no unit. */
+    const serviceAddress = composeAddress(contact.address, contact.addressUnit);
+
     /* ── SMS consent text (shown verbatim to the customer) ─────────── */
     const SMS_CONSENT_TEXT = "By proceeding to the next step you agree to marketing and booking related SMS and Email communications.";
 
@@ -497,13 +533,15 @@ export default function BookingWizard({
                 name: contact.name,
                 phone: contact.phone,
                 email: contact.email,
-                address: contact.address,
+                address: serviceAddress,
                 description: contact.notes || "Widget booking started",
                 source: bookingSource,
                 smsOptIn: true,
                 consentText: SMS_CONSENT_TEXT,
                 metadata: {
                     customerType: contact.customerType,
+                    ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
+                    ...(addressVerified ? {} : { addressVerified: false }),
                 },
             }, apiOpts);
             if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
@@ -515,7 +553,7 @@ export default function BookingWizard({
         } finally {
             setSubmitting(false);
         }
-    }, [contact, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource]);
+    }, [contact, serviceAddress, addressVerified, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource]);
 
     /* ── Final booking submit ─────────────────────────────────────── */
     const handleSubmit = useCallback(async () => {
@@ -556,7 +594,7 @@ export default function BookingWizard({
 
                 const payload: Record<string, unknown> = {
                     type: "booking", status: "booked", serviceType: "junk_removal",
-                    name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
+                    name: contact.name, phone: contact.phone, email: contact.email, address: serviceAddress,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
                     value: isOnSiteEstimate ? undefined : (minPrice || undefined), notes: contact.notes || "",
                     smsOptIn: true,
@@ -564,6 +602,8 @@ export default function BookingWizard({
                     metadata: {
                         serviceType: "junk_removal",
                         customerType: contact.customerType,
+                        ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
+                        ...(addressVerified ? {} : { addressVerified: false }),
                         timeSlot: selectedTime || "",
                         truckLoad: volumeOption?.fraction || "", quoteRange: quoteRangeStr,
                         loadTier: loadTier.title,
@@ -596,8 +636,7 @@ export default function BookingWizard({
                     setSelectedTime(null);
                     setStep(phases.indexOf("schedule"));
                     setError("That time slot just filled up. Please pick a new time.");
-                    setSubmitting(false);
-                    return "";
+                    throw new SlotFullError();
                 }
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
@@ -621,10 +660,32 @@ export default function BookingWizard({
                 const durationLabel = RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration || "";
                 const description = `${containerLabel} dumpster, ${debrisLabel}, ${durationLabel}`;
 
+                // Send the container price explicitly.
+                //
+                // On a "both" booking the two legs share a leadId, the junk leg
+                // writes its minimum onto that lead as `value`, and the dashboard
+                // resolves the rental price as `overrides?.value ?? lead.value ??
+                // configured tier`. With no value here the customer was quoted
+                // the junk minimum for their dumpster.
+                //
+                // This does NOT fully close the bug: the dashboard's dedup path
+                // never writes `value`, so a returning visitor without a stored
+                // syjLeadId still inherits the junk minimum. The dashboard must
+                // prefer the configured tier when the lead's value came from a
+                // different service type. See the ScaleYourJunk brief.
+                //
+                // Keep identical to website-template/components/BookingWizard.tsx.
+                const dumpsterSizeNum = containerSize ? parseInt(containerSize) : 0;
+                const dumpsterTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === dumpsterSizeNum);
+                const containerValue = dumpsterTier
+                    ? roundTo5(dumpsterTier.baseRateMin ?? dumpsterTier.baseRate)
+                    : 0;
+
                 const payload: Record<string, unknown> = {
                     type: "rental_lead", status: "new",
                     serviceType: "dumpster_rental",
-                    name: contact.name, phone: contact.phone, email: contact.email, address: contact.address,
+                    ...(containerValue > 0 ? { value: containerValue } : {}),
+                    name: contact.name, phone: contact.phone, email: contact.email, address: serviceAddress,
                     description, requestedDate: selectedDate?.toISOString().split("T")[0],
                     notes: contact.notes || "",
                     smsOptIn: true,
@@ -632,6 +693,8 @@ export default function BookingWizard({
                     metadata: {
                         serviceType: "dumpster_rental",
                         customerType: contact.customerType,
+                        ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
+                        ...(addressVerified ? {} : { addressVerified: false }),
                         containerSize: containerSize || "", debrisType: debrisType || "",
                         rentalDuration: rentalDuration || "",
                         timeSlot: selectedTime || "",
@@ -653,8 +716,7 @@ export default function BookingWizard({
                     setSelectedTime(null);
                     setStep(phases.indexOf("schedule"));
                     setError("That time slot just filled up. Please pick a new time.");
-                    setSubmitting(false);
-                    return { autoBooked: false };
+                    throw new SlotFullError();
                 }
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
@@ -692,8 +754,12 @@ export default function BookingWizard({
                     }
                 } catch (dumpErr) {
                     if (serviceType === "both") {
-                        // Junk already succeeded — capture error, don't rethrow
-                        dumpsterError = dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
+                        // Junk already succeeded — capture error, don't rethrow.
+                        // SlotFullError carries no message, so name it explicitly
+                        // or the dumpster caveat disappears from the confirmation.
+                        dumpsterError = dumpErr instanceof SlotFullError
+                            ? "slot_full"
+                            : dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
                     } else {
                         throw dumpErr; // dumpster-only — rethrow to outer catch
                     }
@@ -708,7 +774,7 @@ export default function BookingWizard({
                     time: timeSlotOption?.label || formatSlotTime(selectedTime) || "",
                     price: priceStr,
                     serviceType: serviceType || "junk",
-                    address: contact.address || undefined,
+                    address: serviceAddress || undefined,
                     dumpsterPrice: dumpsterPriceStr || undefined,
                     debrisType: debrisType ? (DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType) : undefined,
                     rentalDuration: rentalDuration ? (RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration) : undefined,
@@ -717,11 +783,15 @@ export default function BookingWizard({
                 });
             }
         } catch (err: unknown) {
+            // The slot_full branch already put the customer back on the schedule
+            // step with its own message — don't overwrite it, and don't continue
+            // to the confirmation screen.
+            if (err instanceof SlotFullError) return;
             setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
         } finally {
             setSubmitting(false);
         }
-    }, [contact, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference, bookingSource, isOnSiteEstimate, hasSpecialConditions, apiOpts, config.dumpsterPricing]);
+    }, [contact, serviceAddress, addressVerified, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference, bookingSource, isOnSiteEstimate, hasSpecialConditions, apiOpts, config.dumpsterPricing]);
 
     const formatPhone = (val: string) => {
         const digits = val.replace(/\D/g, "").slice(0, 10);
@@ -865,6 +935,19 @@ export default function BookingWizard({
                                     onPlaceSelect={(place) => {
                                         setContact(c => ({ ...c, address: place.address }));
                                         setAddressConfirmed(true);
+                                        setAddressVerified(place.verified);
+                                        // Typed manually — no ZIP and no coordinates, so neither
+                                        // area check below can run. The booking is accepted and
+                                        // metadata.addressVerified tells the operator to confirm
+                                        // the address themselves. Stated explicitly rather than
+                                        // letting both checks silently pass.
+                                        if (!place.verified) {
+                                            setDistanceMiles(null);
+                                            setDistanceSurcharge(0);
+                                            setAddressInArea(true);
+                                            setOutOfAreaMsg(null);
+                                            return;
+                                        }
                                         // ZIP-based area check (existing)
                                         const zips = config.serviceAreaZips;
                                         let zipOk = true;
@@ -910,6 +993,25 @@ export default function BookingWizard({
                                         Please select an address from the dropdown.
                                     </p>
                                 )}
+                            </div>
+                            {/* Unit is deliberately its own field and deliberately does NOT
+                                touch addressConfirmed — Google's formattedAddress overwrites
+                                the typed address and never carries a unit number, so an
+                                apartment resident otherwise had to choose between confirming
+                                their address and keeping their unit. */}
+                            <div>
+                                <label className="label" htmlFor="syj-address-unit">
+                                    Apt / Suite / Unit (optional)
+                                </label>
+                                <input
+                                    id="syj-address-unit"
+                                    className="input"
+                                    placeholder="e.g. Apt 4B"
+                                    value={contact.addressUnit}
+                                    onChange={(e) => setContact(c => ({ ...c, addressUnit: e.target.value }))}
+                                    autoComplete="address-line2"
+                                    maxLength={40}
+                                />
                             </div>
                             <div>
                                 <label className="label">Property Type</label>
@@ -1428,7 +1530,7 @@ export default function BookingWizard({
                                     const rows: { label: string; value: string }[] = [
                                         { label: "Name", value: contact.name },
                                         { label: "Phone", value: contact.phone },
-                                        { label: "Address", value: contact.address },
+                                        { label: "Address", value: serviceAddress },
                                     ];
                                     if (serviceType === "junk" || serviceType === "both") {
                                         const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);

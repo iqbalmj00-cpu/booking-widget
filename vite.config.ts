@@ -22,5 +22,9 @@ export default defineConfig({
     },
     define: {
         "process.env.NODE_ENV": JSON.stringify("production"),
+        // Stamped into the bundle so any embed's console reveals which build is
+        // actually running. The deployed copy lives in another repo and has
+        // silently lagged this source tree before.
+        __WIDGET_BUILD__: JSON.stringify(new Date().toISOString()),
     },
 });

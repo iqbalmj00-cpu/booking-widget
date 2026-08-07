@@ -17,6 +17,45 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
     const [completed, setCompleted] = useState<BookingCompleteData | null>(null);
 
     if (completed) {
+        const st = completed.serviceType;
+        const hasDumpster = st === "dumpster" || st === "both";
+        const hasJunk = st === "junk" || st === "both";
+        // `autoBooked` arrives as undefined rather than false (the wizard sends
+        // `dumpsterAutoBooked || undefined`), so test it as falsy, not === false.
+        const dumpsterConfirmed = hasDumpster && !!completed.autoBooked;
+        const dumpsterPending = hasDumpster && !completed.autoBooked;
+        // A dumpster request the dashboard couldn't auto-approve creates no
+        // rental and sends the customer no message at all. Promising one here
+        // was the bug: they'd wait for a confirmation that never arrives.
+        const requestOnly = hasDumpster && !hasJunk && !completed.autoBooked;
+
+        const when = `${completed.date}${completed.time ? ` during the ${completed.time} window` : ""}`;
+
+        const heading = requestOnly ? "Request Received!" : "Booking Confirmed!";
+
+        const message = hasJunk && hasDumpster
+            ? dumpsterConfirmed
+                ? `Your junk removal is scheduled for ${when}, and your dumpster is confirmed for delivery.`
+                : `Your junk removal is scheduled for ${when}.`
+            : hasDumpster
+                ? dumpsterConfirmed
+                    ? `Your dumpster is confirmed for delivery on ${when}.`
+                    : `We've received your dumpster rental request for ${when}.`
+                : `Your junk removal is scheduled for ${when}.`;
+
+        // Only needed alongside a junk booking. On a dumpster-only request the
+        // closing line already says a person will be in touch, and saying it
+        // twice reads as padding.
+        const dumpsterNote = !(dumpsterPending && hasJunk)
+            ? null
+            : completed.dumpsterError
+                ? "We couldn't confirm your dumpster automatically. Our team will follow up about your rental shortly."
+                : "We'll confirm dumpster availability and reach out shortly.";
+
+        const closing = requestOnly
+            ? "A member of our team will be in touch to confirm your rental."
+            : "We'll send you a confirmation via text and email shortly.";
+
         return (
             <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)", padding: 40 }}>
                 <div style={{ textAlign: "center", maxWidth: 480 }}>
@@ -24,11 +63,10 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
                         <Check size={36} color="#fff" />
                     </div>
                     <h2 style={{ fontSize: 28, fontWeight: 800, marginBottom: 8, color: "var(--foreground)" }}>
-                        Booking Confirmed!
+                        {heading}
                     </h2>
                     <p style={{ color: "var(--muted)", fontSize: 15, lineHeight: 1.6, marginBottom: 24 }}>
-                        Thank you, <strong>{completed.name}</strong>! Your {completed.serviceType === "both" ? "junk removal and dumpster rental" : completed.serviceType === "dumpster" ? "dumpster rental" : "junk removal"} is scheduled
-                        for <strong>{completed.date}</strong> during the <strong>{completed.time}</strong> window.
+                        Thank you, <strong>{completed.name}</strong>! {message}
                     </p>
                     {completed.price && (
                         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 20px", marginBottom: 16 }}>
@@ -39,13 +77,13 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
                     {completed.address && (
                         <p style={{ fontSize: 13, color: "var(--muted)" }}>📍 {completed.address}</p>
                     )}
-                    {completed.dumpsterError && (
+                    {dumpsterNote && (
                         <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
-                            Our team will follow up about your dumpster rental request shortly.
+                            {dumpsterNote}
                         </p>
                     )}
                     <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 16 }}>
-                        We&apos;ll send you a confirmation via text and email shortly.
+                        {closing}
                     </p>
                 </div>
             </div>

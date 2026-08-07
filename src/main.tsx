@@ -12,8 +12,12 @@
  */
 import { createRoot } from "react-dom/client";
 import Widget from "./components/Widget";
-import type { WidgetConfig } from "./lib/config";
+import WidgetErrorBoundary from "./components/WidgetErrorBoundary";
+import { normalizeBusinessHours, type WidgetConfig } from "./lib/config";
 import "./styles/widget.css";
+
+/** Build timestamp injected by vite.config.ts `define`. */
+declare const __WIDGET_BUILD__: string;
 
 function currentScriptOrigin(): string {
     const script = document.currentScript as HTMLScriptElement | null;
@@ -57,6 +61,11 @@ function hexToRgb(hex: string): string | null {
 }
 
 async function boot() {
+    // Identify the running build. The deployed bundle is a copy held in the
+    // ScaleYourJunk repo and has drifted from source before; without this there
+    // is no way to tell which build an operator's site is actually serving.
+    console.info(`[SYJ Widget] build ${typeof __WIDGET_BUILD__ === "string" ? __WIDGET_BUILD__ : "unknown"}`);
+
     // 1. Find the mount element
     const el = document.getElementById("syj-booking-widget");
     if (!el) {
@@ -99,7 +108,10 @@ async function boot() {
             offersDumpsterRental: serverConfig.offersDumpsterRental ?? false,
             pricing: serverConfig.pricing || { tiers: [], surcharges: [] },
             dumpsterPricing: serverConfig.dumpsterPricing || null,
-            businessHours: serverConfig.businessHours || {},
+            // The dashboard serves `{open,close,closed}`; the wizard reads
+            // `{start,end}`. Fold both into one shape here rather than letting
+            // an undefined `.start` reach the slot code.
+            businessHours: normalizeBusinessHours(serverConfig.businessHours),
             privacyUrl: serverConfig.privacyUrl || el.dataset.privacyUrl || "",
             termsUrl: serverConfig.termsUrl || el.dataset.termsUrl || "",
         };
@@ -115,7 +127,11 @@ async function boot() {
         // 5. Mount the React widget
         el.classList.add("syj-widget-root");
         const root = createRoot(el);
-        root.render(<Widget config={config} initialPromo={initialPromo} bookingSource={bookingSource} />);
+        root.render(
+            <WidgetErrorBoundary phoneNumber={config.phoneNumber} companyName={config.companyName}>
+                <Widget config={config} initialPromo={initialPromo} bookingSource={bookingSource} />
+            </WidgetErrorBoundary>,
+        );
 
     } catch (err) {
         console.error("[SYJ Widget] Failed to initialize:", err);

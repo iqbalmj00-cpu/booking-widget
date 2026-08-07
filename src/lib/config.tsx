@@ -22,7 +22,16 @@ export type Surcharge = {
 };
 export type DistanceTier = { id: string; maxMiles: number; additionalCost: number };
 export type PricingConfig = { truckSize: string; fullLoadPrice?: number; tiers: PricingTier[]; distanceTiers?: DistanceTier[]; surcharges: Surcharge[] };
-export type BusinessDayHours = { start: string; end: string; closed?: boolean };
+export type BusinessDayHours = {
+    start: string;
+    end: string;
+    closed?: boolean;
+    /** Legacy keys as the dashboard actually stores them. `normalizeBusinessHours`
+     *  folds these into start/end at intake; they are declared here so the
+     *  defensive reads in wizardData.ts don't need a cast. */
+    open?: string;
+    close?: string;
+};
 export type BusinessHoursConfig = Record<string, BusinessDayHours>;
 
 export type DumpsterPriceTier = {
@@ -94,6 +103,37 @@ export function ConfigProvider({ config, children }: { config: WidgetConfig; chi
             {children}
         </WidgetConfigContext.Provider>
     );
+}
+
+/* ── Business hours normalisation ──────────────────────────────────── */
+
+/**
+ * Accept either business-hours shape and return the `{start,end}` one.
+ *
+ * The dashboard stores hours as `{open,close,closed}` — that is what onboarding
+ * step 1 writes — but this widget's type has always said `{start,end}`, copied
+ * from a stale comment in the dashboard's Prisma schema. Reading `.start` off
+ * an `{open,close}` object yields `undefined`, and the slot code then called
+ * `.split(":")` on it, which threw and unmounted the entire booking form.
+ *
+ * Normalising here, at the boundary where config enters the widget, means
+ * nothing downstream has to know about the discrepancy.
+ *
+ * Mirrors `normalizeBusinessHours` in website-template/lib/siteConfig.ts.
+ */
+export function normalizeBusinessHours(raw: unknown): BusinessHoursConfig | null {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+    const result: BusinessHoursConfig = {};
+    for (const [day, entry] of Object.entries(raw as Record<string, unknown>)) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+        const e = entry as Record<string, unknown>;
+        result[day] = {
+            start: typeof e.start === "string" ? e.start : typeof e.open === "string" ? e.open : "",
+            end: typeof e.end === "string" ? e.end : typeof e.close === "string" ? e.close : "",
+            ...(e.closed != null && { closed: Boolean(e.closed) }),
+        };
+    }
+    return Object.keys(result).length > 0 ? result : null;
 }
 
 /* ── Helpers (match siteConfig.ts) ─────────────────────────────────── */

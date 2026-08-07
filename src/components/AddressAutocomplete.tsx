@@ -16,6 +16,11 @@ export type PlaceResult = {
     state: string;
     lat: number;
     lng: number;
+    /** False when the customer typed the address themselves rather than picking
+     *  a Google suggestion. Those addresses carry no ZIP and no coordinates, so
+     *  the service-area check cannot run — the booking is still accepted, but
+     *  the operator is told it was never verified. */
+    verified: boolean;
 };
 
 type Props = {
@@ -47,7 +52,7 @@ let placesLibPromise: Promise<any> | null = null;
 function loadPlacesLibrary(apiKey: string): Promise<any> {
     if (placesLibPromise) return placesLibPromise;
 
-    placesLibPromise = new Promise((resolve, reject) => {
+    const pending = new Promise<any>((resolve, reject) => {
         if (typeof window === "undefined") return reject(new Error("SSR"));
 
         const w = window as any;
@@ -73,6 +78,15 @@ function loadPlacesLibrary(apiKey: string): Promise<any> {
         script.onload = importPlaces;
         script.onerror = () => reject(new Error("Failed to load Google Maps"));
         document.head.appendChild(script);
+    });
+
+    // Never cache a failure. Memoising the rejected promise meant one transient
+    // network error killed address autocomplete for the rest of the page's life,
+    // with no way back short of a reload. Mirrors the same fix in
+    // website-template/lib/googleMapsLoader.ts.
+    placesLibPromise = pending.catch((err) => {
+        placesLibPromise = null;
+        throw err;
     });
 
     return placesLibPromise;
@@ -107,6 +121,10 @@ export default function AddressAutocomplete({
                 placesLibRef.current = lib;
                 sessionTokenRef.current = new lib.AutocompleteSessionToken();
                 setReady(true);
+                // A load slower than LOAD_TIMEOUT_MS still succeeds — clear the
+                // "unavailable" notice rather than leaving it up over a working
+                // autocomplete.
+                setLoadFailed(false);
             })
             .catch(() => {
                 clearTimeout(timeoutId);
@@ -167,6 +185,14 @@ export default function AddressAutocomplete({
 
     const handleInputChange = (val: string) => {
         onChange(val);
+        // Real manual-entry fallback. When Places is configured but failed to
+        // load, the notice below promises the customer they can type their
+        // address — but only a suggestion click used to mark the address
+        // confirmed, so that promise was empty and the customer could never
+        // advance past this step. Accept typed input instead, flagged unverified.
+        if (loadFailed) {
+            onPlaceSelect({ address: val, zip: "", city: "", state: "", lat: 0, lng: 0, verified: false });
+        }
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => fetchSuggestions(val), DEBOUNCE_MS);
     };
@@ -201,7 +227,7 @@ export default function AddressAutocomplete({
             }
 
             onChange(formatted);
-            onPlaceSelect({ address: formatted, zip, city, state, lat, lng });
+            onPlaceSelect({ address: formatted, zip, city, state, lat, lng, verified: true });
 
             // A session ends with a place details fetch — start a new one.
             sessionTokenRef.current = new placesLibRef.current.AutocompleteSessionToken();
@@ -240,7 +266,7 @@ export default function AddressAutocomplete({
                     value={value}
                     onChange={(e) => {
                         onChange(e.target.value);
-                        onPlaceSelect({ address: e.target.value, zip: "", city: "", state: "", lat: 0, lng: 0 });
+                        onPlaceSelect({ address: e.target.value, zip: "", city: "", state: "", lat: 0, lng: 0, verified: false });
                     }}
                 />
             </div>
