@@ -26,9 +26,35 @@ export const DEPLOYED_DIST =
 /** Files that make up a release. `loader.js` is owned by ScaleYourJunk, not built here. */
 export const ARTIFACTS = ["embed.iife.js", "embed.css"];
 
+/**
+ * vite.config.ts stamps `new Date().toISOString()` into every build so an
+ * embed's console reveals which build is running. Hashed as-is, that made two
+ * builds of identical source differ, so check:sync reported drift every single
+ * time — a guard that always fails is worse than no guard, because the one real
+ * drift is indistinguishable from the noise.
+ *
+ * Blank the stamp before hashing. The comparison then sees the code and nothing
+ * else. The pattern is an ISO-8601 instant, which appears exactly once in a
+ * build (assertBuildStampCount checks that, so this cannot rot into a
+ * normaliser that matches nothing and silently restores the old behaviour).
+ */
+const BUILD_STAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g;
+const BUILD_STAMP_PLACEHOLDER = "<build-stamp>";
+
+/** Every build stamp in a file, in order. Empty for a missing file. */
+export function buildStamps(path) {
+    if (!existsSync(path)) return [];
+    return readFileSync(path, "utf8").match(BUILD_STAMP_RE) ?? [];
+}
+
 export function sha256(path) {
     if (!existsSync(path)) return null;
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    const raw = readFileSync(path);
+    // CSS carries no stamp; leaving it as bytes keeps that comparison exact.
+    const bytes = path.endsWith(".js")
+        ? Buffer.from(raw.toString("utf8").replace(BUILD_STAMP_RE, BUILD_STAMP_PLACEHOLDER), "utf8")
+        : raw;
+    return createHash("sha256").update(bytes).digest("hex");
 }
 
 export function shortHash(hash) {

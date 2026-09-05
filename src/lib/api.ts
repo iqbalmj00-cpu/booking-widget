@@ -9,6 +9,24 @@ type RequestOptions = {
     widgetApiUrl: string;
 };
 
+/**
+ * Carries the HTTP status alongside the message. Callers that must tell one
+ * refusal from another — card-on-file confirmation answers 200, 409, 403, 422,
+ * 429 and more, and they mean very different things to a customer — cannot do
+ * that from an Error message alone.
+ */
+export class ApiError extends Error {
+    readonly status: number;
+    readonly code: string;
+
+    constructor(message: string, status: number, code: string) {
+        super(message);
+        this.name = "ApiError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
 async function apiPost(path: string, body: Record<string, unknown>, opts: RequestOptions) {
     const res = await fetch(`${opts.widgetApiUrl}${path}`, {
         method: "POST",
@@ -19,7 +37,7 @@ async function apiPost(path: string, body: Record<string, unknown>, opts: Reques
         body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `API error: ${path}`);
+    if (!res.ok) throw new ApiError(data.error || `API error: ${path}`, res.status, typeof data.error === "string" ? data.error : "");
     return data;
 }
 
@@ -30,7 +48,7 @@ async function apiGet(path: string, params: Record<string, string>, opts: Reques
         headers: { "x-site-token": opts.siteToken },
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `API error: ${path}`);
+    if (!res.ok) throw new ApiError(data.error || `API error: ${path}`, res.status, typeof data.error === "string" ? data.error : "");
     return data;
 }
 

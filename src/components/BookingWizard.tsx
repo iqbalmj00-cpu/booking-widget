@@ -5,7 +5,15 @@ import AddressAutocomplete from "./AddressAutocomplete";
 import { VolumeEstimator } from "./VolumeEstimator";
 import { haversineDistance } from "../lib/haversine";
 import { useConfig, formatDumpsterPrice, roundTo5 } from "../lib/config";
-import { widgetApi } from "../lib/api";
+import { widgetApi, ApiError } from "../lib/api";
+import {
+    promoAppliesToService, promoAppliesToBooking,
+    applyPromoDiscount, formatPriceAmount,
+    classifyCardConfirmation, mergeCardConfirmations, type CardConfirmation,
+    classifyAvailabilityResponse, availabilityBlocksBooking, type AvailabilityState,
+    describeLoadSize, describeEdgeCaseNote, validatePhone, MULTI_LOAD_EDGE_CASE_ID,
+    isStaleLeadResponse, bookingSubmitErrorMessage,
+} from "../lib/bookingLogic";
 import {
     VOLUME_OPTIONS,
     LOCATION_OPTIONS, TIME_SLOTS,
@@ -21,22 +29,15 @@ export type BookingCompleteData = {
     name: string; date: string; time: string; price: string;
     serviceType: string; address?: string; dumpsterPrice?: string;
     debrisType?: string; rentalDuration?: string; autoBooked?: boolean;
-    dumpsterError?: string;
+    dumpsterError?: string; cardIssue?: CardConfirmation;
 };
 
-/**
- * Thrown when the dashboard reports the chosen slot filled while we were
- * submitting. It aborts the submit so the customer stays on the schedule step
- * instead of falling through to a confirmation screen for a booking that was
- * never created.
- *
- * The dashboard removed its `slot_full` response in March 2026, so this cannot
- * currently fire. It stays because the alternative — falling through — tells a
- * customer they are booked when they are not, and nothing would flag it.
- *
- * Keep identical to website-template/components/BookingWizard.tsx.
- */
-class SlotFullError extends Error {}
+/** The fields the booking endpoint answers with that this wizard reads. */
+type BookingResponse = {
+    leadId?: string;
+    customerId?: string;
+    autoBooked?: boolean;
+};
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
 type ContactInfo = {
@@ -250,12 +251,16 @@ export default function BookingWizard({
         overageRatePerTon?: number; alternativeSizes?: number[];
         nextAvailableDate?: string;
     } | null>(null);
-    const [checkingAvailability, setCheckingAvailability] = useState(false);
+    // Explicit state, because "no verdict" is not "unavailable". apiGet throws
+    // on any non-200 as well as on a network fault, so both used to collapse to
+    // null and the panels drew nothing (or an empty box) with no explanation.
+    const [availabilityState, setAvailabilityState] = useState<AvailabilityState>("idle");
 
     /* ── Promo code state ── */
     const [promoCode, setPromoCode] = useState<string | null>(initialPromo || saved?.promoCode || null);
     const [promoResult, setPromoResult] = useState<{
         valid: boolean; discountType?: string; discountValue?: number; label?: string; reason?: string;
+        appliesTo?: string;
     } | null>(null);
     const [promoValidating, setPromoValidating] = useState(false);
     const [promoInputOpen, setPromoInputOpen] = useState(saved?.promoInputOpen ?? false);
@@ -295,11 +300,23 @@ export default function BookingWizard({
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
         addressConfirmed, addressVerified]);
 
+    // A booking switched to junk-only must not keep its dumpster answers: they
+    // would otherwise ride along in the payload and the confirmation. Only
+    // "junk" clears — leaving the choice unset is not the same as changing it,
+    // and clearing there would wipe answers restored from sessionStorage.
+    useEffect(() => {
+        if (serviceType !== "junk") return;
+        setContainerSize(null);
+        setDebrisType(null);
+        setRentalDuration(null);
+        setPaymentPreference(null);
+    }, [serviceType]);
+
     // Check container availability — only fires when date is selected for accurate date-aware check
     useEffect(() => {
-        if (!containerSize || !selectedDate) { setContainerAvailability(null); return; }
+        if (!containerSize || !selectedDate) { setContainerAvailability(null); setAvailabilityState("idle"); return; }
         let cancelled = false;
-        setCheckingAvailability(true);
+        setAvailabilityState("checking");
         (async () => {
             try {
                 const params: { size: string; date?: string; days?: string } = { size: String(parseInt(containerSize)) };
@@ -309,11 +326,15 @@ export default function BookingWizard({
                     params.days = daysMap[rentalDuration] || "14";
                 }
                 const data = await widgetApi.checkAvailability(params, apiOpts);
-                if (!cancelled) setContainerAvailability(data);
+                if (cancelled) return;
+                const state = classifyAvailabilityResponse(true, data);
+                setAvailabilityState(state);
+                // Only a real verdict may drive the pricing and banner details.
+                setContainerAvailability(state === "available" || state === "unavailable" ? data : null);
             } catch {
-                if (!cancelled) setContainerAvailability(null);
-            } finally {
-                if (!cancelled) setCheckingAvailability(false);
+                // apiGet throws for a refusal and for a network fault alike, and
+                // neither is the dashboard saying no.
+                if (!cancelled) { setAvailabilityState("error"); setContainerAvailability(null); }
             }
         })();
         return () => { cancelled = true; };
@@ -350,13 +371,20 @@ export default function BookingWizard({
         return () => { cancelled = true; };
     }, [promoCode]);
 
-    // Apply discount to a price
-    const applyDiscount = (price: number): number => {
-        if (!promoResult?.valid || !promoResult.discountValue) return price;
-        if (promoResult.discountType === "percentage") return roundTo5(price * (1 - promoResult.discountValue / 100));
-        if (promoResult.discountType === "flat") return roundTo5(Math.max(0, price - promoResult.discountValue));
-        return price;
+    // The discounted price the dashboard will actually book, formatted for
+    // display. Rounding to $5 here showed $300 on a $350 quote at 15% that the
+    // dashboard books at $297.50 — see ../lib/bookingLogic.ts.
+    const discountedPriceText = (price: number): string => {
+        if (!promoResult?.valid) return formatPriceAmount(price);
+        return formatPriceAmount(applyPromoDiscount(price, promoResult.discountType, promoResult.discountValue));
     };
+
+    // Every promo is scoped to junk, dumpster or both. The dashboard re-checks
+    // that scope when the booking lands and discounts nothing outside it, so a
+    // code that does not cover a leg must not advertise a discount on it.
+    const promoDiscountsJunk = !!promoResult?.valid && promoAppliesToService(promoResult.appliesTo, "junk");
+    const promoDiscountsDumpster = !!promoResult?.valid && promoAppliesToService(promoResult.appliesTo, "dumpster");
+    const promoApplies = !!promoResult?.valid && promoAppliesToBooking(promoResult.appliesTo, serviceType);
 
     // 1. Create SetupIntent when entering quote phase (independent of payment preference)
     useEffect(() => {
@@ -429,8 +457,13 @@ export default function BookingWizard({
 
     /* ── Browser back-button integration ── */
     useEffect(() => {
-        // Replace current entry so we have step=0 as base
-        window.history.replaceState({ wizardStep: 0 }, "");
+        // Base the history on the step actually being shown — after a reload
+        // that is the step restored from sessionStorage, not 0, and claiming 0
+        // made the first Back jump to the start instead of one step back.
+        // Merged into the existing state rather than replacing it: this entry is
+        // the operator's page, and whatever their own site keeps here has to
+        // survive the widget mounting on top of it.
+        window.history.replaceState({ ...window.history.state, wizardStep: saved?.step ?? 0 }, "");
 
         const onPopState = (e: PopStateEvent) => {
             const prevStep = e.state?.wizardStep;
@@ -442,12 +475,12 @@ export default function BookingWizard({
         };
         window.addEventListener("popstate", onPopState);
         return () => window.removeEventListener("popstate", onPopState);
-    }, []);
+    }, [saved]);
 
     const goNext = () => {
         const next = step + 1;
         setStep(next);
-        window.history.pushState({ wizardStep: next }, "");
+        window.history.pushState({ ...window.history.state, wizardStep: next }, "");
     };
     const goBack = () => {
         if (step > 0) window.history.back(); // triggers popstate → setStep
@@ -464,8 +497,10 @@ export default function BookingWizard({
             return next;
         });
 
-    const isOnSiteEstimate = !!edgeCases["unknown"] || volume === "multi";
-    const hasSpecialConditions = Object.values(edgeCases).some(Boolean);
+    // Both mean "more than one truck": the checkbox the customer ticks, and the
+    // sixth LOAD_TIERS entry (unreachable today — the estimator stops at five).
+    const multiTruckLoad = !!edgeCases[MULTI_LOAD_EDGE_CASE_ID] || volume === "multi";
+    const isOnSiteEstimate = !!edgeCases["unknown"] || multiTruckLoad;
 
     /* ── Sync tierIndex → volume ── */
     useEffect(() => { setVolume(LOAD_TIERS[tierIndex].volumeId); }, [tierIndex]);
@@ -493,10 +528,10 @@ export default function BookingWizard({
     const canProceed = () => {
         switch (currentPhase) {
             case "contact": {
-                const hasRequired = !!(contact.name && contact.phone && contact.email && contact.address);
+                const hasRequired = !!(contact.name && contact.email && contact.address);
                 const areaOk = addressConfirmed && addressInArea && !outOfAreaMsg;
                 const emailOk = emailValidation.valid;
-                return hasRequired && areaOk && emailOk;
+                return hasRequired && areaOk && emailOk && phoneValidation.valid;
             }
             case "service_type": return serviceType !== null;
             case "load_estimate":
@@ -506,7 +541,7 @@ export default function BookingWizard({
             case "dumpster_details": return debrisType !== null && rentalDuration !== null;
             case "schedule": {
                 if (!selectedDate || !selectedTime) return false;
-                if ((serviceType === "dumpster" || serviceType === "both") && containerAvailability?.available === false) return false;
+                if ((serviceType === "dumpster" || serviceType === "both") && availabilityBlocksBooking(availabilityState)) return false;
                 return true;
             }
             case "quote": return termsAccepted;
@@ -560,12 +595,35 @@ export default function BookingWizard({
         setSubmitting(true);
         setError("");
         try {
-            const leadId = typeof window !== "undefined" ? localStorage.getItem("syjLeadId") : null;
+            // The stored lead id, held so both legs see it go away together:
+            // once one leg proves the id names nothing, the other must not
+            // send it either. Only ever cleared, never re-pointed — which
+            // leaves the id each leg sends exactly what it sent before.
+            const lead: { id: string | null } =
+                { id: typeof window !== "undefined" ? localStorage.getItem("syjLeadId") : null };
             const timeSlotOption = dynamicSlots?.find(s => `${s.start}-${s.end}` === selectedTime)
                 ?? TIME_SLOTS.find(t => t.id === selectedTime);
 
             // Shared card confirmation (runs once, caches result)
             let confirmedPaymentMethodId: string | null = null;
+            // How saving the card actually went. Every status used to be read as
+            // success, so a card that never saved still reported one — and on a
+            // 409 the new card is discarded while the old one stays default.
+            // The booking is never blocked on this; only what we claim changes.
+            // Held on an object, not in a bare `let`: TypeScript narrows a local
+            // assigned only from inside a closure back to its initializer.
+            const card: { outcome: CardConfirmation | null } = { outcome: null };
+            const recordCardConfirmation = async (customerId: string, paymentMethodId: string) => {
+                try {
+                    await widgetApi.confirmCard(customerId, paymentMethodId, apiOpts);
+                    card.outcome = mergeCardConfirmations(card.outcome, "saved");
+                } catch (err) {
+                    const status = err instanceof ApiError ? err.status : 0;
+                    const code = err instanceof ApiError ? err.code : "";
+                    card.outcome = mergeCardConfirmations(card.outcome, classifyCardConfirmation(false, status, code));
+                    console.warn("Card confirmation failed:", err);
+                }
+            };
             const confirmCard = async (): Promise<string | null> => {
                 if (confirmedPaymentMethodId) return confirmedPaymentMethodId;
                 if (!hasStripe || !stripeRef.current || !cardRef.current || !setupClientSecret) return null;
@@ -578,18 +636,70 @@ export default function BookingWizard({
                 return confirmedPaymentMethodId;
             };
 
+            /**
+             * Post a leg, with exactly one retry, reserved for exactly one
+             * case: a stored lead id the dashboard cannot find.
+             *
+             * Safe to repeat because that 404 is returned before the endpoint
+             * writes anything — no lead, no job, no customer, no charge — so
+             * the second post is the only one that creates anything. The card
+             * is confirmed with Stripe before either post and memoised, so it
+             * is not re-taken; confirm-card runs only after a post succeeds,
+             * so it still runs once. Nothing else is ever retried.
+             */
+            const postBooking = async (payload: Record<string, unknown>): Promise<BookingResponse> => {
+                const send = async (): Promise<{ data?: BookingResponse; status: number; message: string }> => {
+                    try {
+                        return { data: await widgetApi.submitBooking(payload, apiOpts) as BookingResponse, status: 200, message: "" };
+                    } catch (err) {
+                        // Anything that is not an ApiError is the network or a
+                        // body that would not parse — never text for a customer.
+                        if (err instanceof ApiError) return { status: err.status, message: err.message };
+                        return { status: 0, message: "" };
+                    }
+                };
+                let out = await send();
+                if (isStaleLeadResponse(out.status, payload.leadId !== undefined)) {
+                    lead.id = null;
+                    delete payload.leadId;
+                    try { localStorage.removeItem("syjLeadId"); } catch {}
+                    out = await send();
+                }
+                if (!out.data) throw new Error(bookingSubmitErrorMessage(out.message));
+                return out.data;
+            };
+
             /* ── JUNK REMOVAL payload ── */
             const sendJunkBooking = async () => {
                 const loadTier = LOAD_TIERS[tierIndex];
                 const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
-                const description = isOnSiteEstimate
-                    ? `${loadTier.title} — on-site estimate${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`
-                    : `${loadTier.title} junk removal${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`;
                 const volumeOption = VOLUME_OPTIONS.find(v => v.id === volume);
+                // The slider tier is a floor once the customer says it takes more
+                // than one truck; sending it as the job would put the crew in one
+                // truck sized for a quarter load. See ../lib/bookingLogic.ts.
+                const loadSize = describeLoadSize({
+                    multiTruckLoad,
+                    tierTitle: loadTier.title,
+                    truckFraction: volumeOption?.fraction || "",
+                });
+                const description = isOnSiteEstimate
+                    ? `${loadSize.loadTier} — on-site estimate${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`
+                    : `${loadSize.loadTier} junk removal${edgeCaseIds.length ? ` (${edgeCaseIds.join(", ")})` : ""}`;
                 const locationOption = LOCATION_OPTIONS.find(l => l.id === location);
                 const minPrice = tierData ? roundTo5(tierData.min + totalAdj) : 0;
                 const maxPrice = tierData ? roundTo5(tierData.max + totalAdj) : 0;
-                const quoteRangeStr = isOnSiteEstimate ? "On-Site Estimate" : (tierData ? `$${minPrice} – $${maxPrice}` : "");
+                // Matches what the website wizard sends when no price book exists.
+                const quoteRangeStr = isOnSiteEstimate
+                    ? "On-Site Estimate"
+                    : (tierData ? `$${minPrice} – $${maxPrice}` : "Quote confirmed on site");
+                // What the customer is shown, which is not what we submit. The
+                // payload keeps the list price on purpose — the dashboard
+                // resolves the promo itself and would otherwise discount an
+                // already-discounted figure — but the confirmation has to
+                // repeat the number the quote step showed, not a higher one.
+                const displayRangeStr = (promoDiscountsJunk && !isOnSiteEstimate && tierData)
+                    ? `$${discountedPriceText(minPrice)} – $${discountedPriceText(maxPrice)}`
+                    : quoteRangeStr;
                 const stairsAccessLabel = locationOption?.label || "Ground Floor";
 
                 const payload: Record<string, unknown> = {
@@ -605,12 +715,16 @@ export default function BookingWizard({
                         ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
                         ...(addressVerified ? {} : { addressVerified: false }),
                         timeSlot: selectedTime || "",
-                        truckLoad: volumeOption?.fraction || "", quoteRange: quoteRangeStr,
-                        loadTier: loadTier.title,
+                        truckLoad: loadSize.truckLoad, quoteRange: quoteRangeStr,
+                        loadTier: loadSize.loadTier,
                         junkLocation: locationOption?.label || "", stairsAccess: stairsAccessLabel,
                         specialConditions: edgeCaseIds,
                         isOnSiteEstimate,
-                        edgeCaseNote: isOnSiteEstimate ? "On-site estimate — customer unsure of load" : (hasSpecialConditions ? `Flagged: ${edgeCaseIds.join(", ")}` : ""),
+                        edgeCaseNote: describeEdgeCaseNote({
+                            multiTruckLoad,
+                            unsureOfLoad: !!edgeCases["unknown"],
+                            flaggedIds: edgeCaseIds,
+                        }),
                         priceRange: isOnSiteEstimate ? null : (tierData ? [minPrice, maxPrice] : null),
                         surcharges: [
                             ...(accessAmount > 0 ? [{ id: "access", label: accessSurcharge?.label || "Access surcharge", amount: accessAmount, location: location || undefined }] : []),
@@ -624,33 +738,22 @@ export default function BookingWizard({
                     source: bookingSource,
                     ...(promoCode ? { promoCode } : {}),
                 };
-                if (leadId) payload.leadId = leadId;
+                if (lead.id) payload.leadId = lead.id;
 
                 // Stripe card-on-file
                 const pmId = paymentPreference === "card" ? await confirmCard() : null;
                 if (pmId) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
 
-                const data = await widgetApi.submitBooking(payload, apiOpts);
-                if (data.error === "slot_full") {
-                    setDynamicSlots(data.availableSlots || []);
-                    setSelectedTime(null);
-                    setStep(phases.indexOf("schedule"));
-                    setError("That time slot just filled up. Please pick a new time.");
-                    throw new SlotFullError();
-                }
+                const data = await postBooking(payload);
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
 
                 // Confirm card-on-file with dashboard
                 if (pmId && data.customerId) {
-                    try {
-                        await widgetApi.confirmCard(data.customerId, pmId, apiOpts);
-                    } catch (err) {
-                        console.warn("Card confirmation failed:", err);
-                    }
+                    await recordCardConfirmation(data.customerId, pmId);
                 }
 
-                return quoteRangeStr;
+                return displayRangeStr;
             };
 
             /* ── DUMPSTER RENTAL payload ── */
@@ -698,36 +801,38 @@ export default function BookingWizard({
                         containerSize: containerSize || "", debrisType: debrisType || "",
                         rentalDuration: rentalDuration || "",
                         timeSlot: selectedTime || "",
+                        // The stock check failed, so this booking was allowed
+                        // through without one. Flag it for the dashboard rather
+                        // than refusing every rental whenever the check is down.
+                        // metadata is free-form JSON — no dashboard change needed.
+                        ...(availabilityState === "error" ? { availabilityCheckFailed: true } : {}),
                         termsAcceptedAt: new Date().toISOString(),
                         ...(paymentPreference ? { paymentPreference } : {}),
                     },
                     source: bookingSource,
                     ...(promoCode ? { promoCode } : {}),
                 };
-                if (leadId) payload.leadId = leadId;
+                if (lead.id) payload.leadId = lead.id;
 
                 // Stripe card-on-file
                 const pmId = paymentPreference === "card" ? await confirmCard() : null;
                 if (pmId) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
 
-                const data = await widgetApi.submitBooking(payload, apiOpts);
-                if (data.error === "slot_full") {
-                    setDynamicSlots(data.availableSlots || []);
-                    setSelectedTime(null);
-                    setStep(phases.indexOf("schedule"));
-                    setError("That time slot just filled up. Please pick a new time.");
-                    throw new SlotFullError();
-                }
+                const data = await postBooking(payload);
                 if (data.leadId) localStorage.setItem("syjLeadId", data.leadId);
                 if (data.customerId) setStoredCustomerId(data.customerId);
 
                 // Confirm card-on-file with dashboard
                 if (pmId && data.customerId) {
-                    try {
-                        await widgetApi.confirmCard(data.customerId, pmId, apiOpts);
-                    } catch (err) {
-                        console.warn("Card confirmation failed:", err);
-                    }
+                    await recordCardConfirmation(data.customerId, pmId);
+                } else if (pmId) {
+                    // No customerId means the dashboard could not auto-approve
+                    // this rental, so there is no customer to attach the card
+                    // to and confirm-card is never called. Nothing failed and
+                    // nothing was charged — but the quote step promised the
+                    // base rate on confirmation, so silence is the wrong
+                    // answer. See ../lib/bookingLogic.ts.
+                    card.outcome = mergeCardConfirmations(card.outcome, "not_saved_pending_approval");
                 }
 
                 return { autoBooked: data.autoBooked };
@@ -750,16 +855,21 @@ export default function BookingWizard({
                     const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
                     if (dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0))) {
                         const sizeLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "";
-                        dumpsterPriceStr = `${sizeLabel} — ${formatDumpsterPrice(dTier)}`;
+                        // formatDumpsterPrice is the list price; when a promo
+                        // covers this leg the quote step showed less than that.
+                        const dMin = roundTo5(dTier.baseRateMin ?? dTier.baseRate);
+                        const dMax = dTier.baseRateMax ? roundTo5(dTier.baseRateMax) : null;
+                        const dPriceText = !promoDiscountsDumpster
+                            ? formatDumpsterPrice(dTier)
+                            : (dMax && dMax > dMin
+                                ? `$${discountedPriceText(dMin)} – $${discountedPriceText(dMax)}`
+                                : `Starting at $${discountedPriceText(dMin)}`);
+                        dumpsterPriceStr = `${sizeLabel} — ${dPriceText}`;
                     }
                 } catch (dumpErr) {
                     if (serviceType === "both") {
                         // Junk already succeeded — capture error, don't rethrow.
-                        // SlotFullError carries no message, so name it explicitly
-                        // or the dumpster caveat disappears from the confirmation.
-                        dumpsterError = dumpErr instanceof SlotFullError
-                            ? "slot_full"
-                            : dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
+                        dumpsterError = dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
                     } else {
                         throw dumpErr; // dumpster-only — rethrow to outer catch
                     }
@@ -780,18 +890,16 @@ export default function BookingWizard({
                     rentalDuration: rentalDuration ? (RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration) : undefined,
                     autoBooked: dumpsterAutoBooked || undefined,
                     dumpsterError: dumpsterError || undefined,
+                    // Omitted when the card saved, so the confirmation stays quiet.
+                    cardIssue: card.outcome && card.outcome !== "saved" ? card.outcome : undefined,
                 });
             }
         } catch (err: unknown) {
-            // The slot_full branch already put the customer back on the schedule
-            // step with its own message — don't overwrite it, and don't continue
-            // to the confirmation screen.
-            if (err instanceof SlotFullError) return;
             setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
         } finally {
             setSubmitting(false);
         }
-    }, [contact, serviceAddress, addressVerified, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, paymentPreference, bookingSource, isOnSiteEstimate, hasSpecialConditions, apiOpts, config.dumpsterPricing]);
+    }, [contact, serviceAddress, addressVerified, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, promoResult, promoDiscountsJunk, promoDiscountsDumpster, paymentPreference, bookingSource, isOnSiteEstimate, multiTruckLoad, availabilityState, apiOpts, config.dumpsterPricing]);
 
     const formatPhone = (val: string) => {
         const digits = val.replace(/\D/g, "").slice(0, 10);
@@ -845,6 +953,8 @@ export default function BookingWizard({
     };
 
     const emailValidation = validateEmail(contact.email);
+    // Shared with the website wizard — see ../lib/bookingLogic.ts.
+    const phoneValidation = validatePhone(contact.phone);
 
     /* ── Render ──────────────────────────────────────────────────────────── */
     return (
@@ -856,15 +966,15 @@ export default function BookingWizard({
                 ))}
             </div>
             {/* Promo banner */}
-            {promoResult?.valid && (
+            {promoApplies && (
                 <div style={{ maxWidth: 720, margin: "8px auto 0", padding: "10px 20px", background: "linear-gradient(135deg, #059669, #10B981)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ color: "#fff", fontSize: 13, fontWeight: 600 }}>🎉 {promoResult.discountValue}{promoResult.discountType === "percentage" ? "%" : "$"} off applied!</span>
                     <button onClick={() => { setPromoCode(null); setPromoResult(null); setPromoInputValue(""); }} style={{ background: "rgba(255,255,255,0.2)", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}>Remove</button>
                 </div>
             )}
-            {promoResult && !promoResult.valid && promoCode && (
+            {promoResult && promoCode && !promoApplies && (
                 <div style={{ maxWidth: 720, margin: "8px auto 0", padding: "10px 20px", background: "#FEF2F2", borderRadius: 10, border: "1px solid #FECACA" }}>
-                    <span style={{ color: "#991B1B", fontSize: 13, fontWeight: 600 }}>Code &ldquo;{promoCode}&rdquo; is not valid{promoResult.reason === "expired" ? " (expired)" : promoResult.reason === "max_uses_reached" ? " (fully redeemed)" : ""}.</span>
+                    <span style={{ color: "#991B1B", fontSize: 13, fontWeight: 600 }}>{promoResult.valid ? <>Code &ldquo;{promoCode}&rdquo; doesn&rsquo;t apply to this service.</> : <>Code &ldquo;{promoCode}&rdquo; is not valid{promoResult.reason === "expired" ? " (expired)" : promoResult.reason === "max_uses_reached" ? " (fully redeemed)" : ""}.</>}</span>
                 </div>
             )}
             <div style={{ maxWidth: 720, margin: "0 auto", padding: "8px 20px 0", display: "flex", justifyContent: "space-between" }}>
@@ -895,7 +1005,12 @@ export default function BookingWizard({
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                                 <div>
                                     <label className="label">Phone *</label>
-                                    <input className="input" placeholder="(555) 123-4567" value={contact.phone} onChange={e => setContact(c => ({ ...c, phone: formatPhone(e.target.value) }))} />
+                                    <input className="input" placeholder="(555) 123-4567" value={contact.phone}
+                                        style={contact.phone && !phoneValidation.valid && phoneValidation.error ? { borderColor: "#DC2626" } : undefined}
+                                        onChange={e => setContact(c => ({ ...c, phone: formatPhone(e.target.value) }))} />
+                                    {contact.phone && !phoneValidation.valid && phoneValidation.error && (
+                                        <p style={{ fontSize: 12, color: "#DC2626", marginTop: 4 }}>{phoneValidation.error}</p>
+                                    )}
                                 </div>
                                 <div>
                                     <label className="label">Email *</label>
@@ -1288,9 +1403,9 @@ export default function BookingWizard({
                             })}
                         </div>
                         {/* Availability indicator */}
-                        {containerSize && (checkingAvailability || containerAvailability) && (
-                            <div style={{ marginTop: 16, padding: "12px 18px", borderRadius: 12, textAlign: "center", fontSize: 14, fontWeight: 600, ...(checkingAvailability ? { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" } : containerAvailability?.available ? { background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#16A34A" } : containerAvailability && !containerAvailability.available ? { background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626" } : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" }) }}>
-                                {checkingAvailability ? "Checking availability..." : containerAvailability?.available ? "✓ In stock" : containerAvailability && !containerAvailability.available ? (<>{containerAvailability.nextAvailableDate ? `Next available: ${new Date(containerAvailability.nextAvailableDate).toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : "Currently unavailable"}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.length > 0 && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4 }}>Other sizes in stock: {containerAvailability.alternativeSizes.map(s => `${s}yd³`).join(", ")}</span>)}</>) : null}
+                        {containerSize && availabilityState !== "idle" && (
+                            <div style={{ marginTop: 16, padding: "12px 18px", borderRadius: 12, textAlign: "center", fontSize: 14, fontWeight: 600, ...(availabilityState === "checking" ? { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" } : availabilityState === "available" ? { background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#16A34A" } : availabilityState === "unavailable" ? { background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626" } : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" }) }}>
+                                {availabilityState === "checking" ? "Checking availability..." : availabilityState === "available" ? "✓ In stock" : availabilityState === "unavailable" && containerAvailability ? (<>{containerAvailability.nextAvailableDate ? `Next available: ${new Date(containerAvailability.nextAvailableDate).toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : "Currently unavailable"}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.length > 0 && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4 }}>Other sizes in stock: {containerAvailability.alternativeSizes.map(s => `${s}yd³`).join(", ")}</span>)}</>) : "Couldn\u2019t check stock just now \u2014 you can still continue."}
                             </div>
                         )}
                     </div>
@@ -1358,7 +1473,7 @@ export default function BookingWizard({
                             if (renderSlots.length === 0) return (
                                 <div style={{ textAlign: "center", padding: 24, background: "#FEF2F2", borderRadius: 12, border: "1px solid #FECACA" }}>
                                     <AlertTriangle size={20} color="#DC2626" style={{ marginBottom: 8 }} />
-                                    <div style={{ fontSize: 14, color: "#DC2626", fontWeight: 600 }}>{dynamicSlots ? "No availability on this day" : "We&apos;re closed on this day"}</div>
+                                    <div style={{ fontSize: 14, color: "#DC2626", fontWeight: 600 }}>{dynamicSlots ? "No availability on this day" : "We\u0027re closed on this day"}</div>
                                     <div style={{ fontSize: 13, color: "#DC2626", marginTop: 4 }}>Please select a different date.</div>
                                 </div>
                             );
@@ -1404,9 +1519,9 @@ export default function BookingWizard({
                             );
                         })()}
                         {/* Date-specific availability indicator for dumpster rentals */}
-                        {selectedDate && (serviceType === "dumpster" || serviceType === "both") && containerSize && (
-                            <div style={{ marginTop: 16, padding: "14px 18px", borderRadius: 12, textAlign: "center", fontSize: 14, fontWeight: 600, ...(checkingAvailability ? { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" } : containerAvailability?.available ? { background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#16A34A" } : containerAvailability && !containerAvailability.available ? { background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626" } : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" }) }}>
-                                {checkingAvailability ? "Checking availability for your date..." : containerAvailability?.available ? `✓ ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "Container"} available for ${selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : containerAvailability && !containerAvailability.available ? (<><AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} />{containerAvailability.nextAvailableDate ? (<>No {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.<span style={{ display: "block", fontSize: 13, fontWeight: 500, marginTop: 6 }}>Next available: <button onClick={() => { setSelectedDate(new Date(containerAvailability.nextAvailableDate!)); setSelectedTime(null); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 13, padding: 0 }}>{new Date(containerAvailability.nextAvailableDate!).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</button></span></>) : `No ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.`}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.length > 0 && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4, color: "var(--muted)" }}>Or try a different size: {containerAvailability.alternativeSizes.map(s => <button key={s} onClick={() => { setContainerSize(String(s)); setStep(phases.indexOf("dumpster_size")); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 12, padding: 0 }}>{s}yd³</button>).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, ", ", el], [])}</span>)}</>) : null}
+                        {selectedDate && (serviceType === "dumpster" || serviceType === "both") && containerSize && availabilityState !== "idle" && (
+                            <div style={{ marginTop: 16, padding: "14px 18px", borderRadius: 12, textAlign: "center", fontSize: 14, fontWeight: 600, ...(availabilityState === "checking" ? { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" } : availabilityState === "available" ? { background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#16A34A" } : availabilityState === "unavailable" ? { background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626" } : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" }) }}>
+                                {availabilityState === "checking" ? "Checking availability for your date..." : availabilityState === "available" ? `✓ ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "Container"} available for ${selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : availabilityState === "unavailable" && containerAvailability ? (<><AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} />{containerAvailability.nextAvailableDate ? (<>No {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.<span style={{ display: "block", fontSize: 13, fontWeight: 500, marginTop: 6 }}>Next available: <button onClick={() => { setSelectedDate(new Date(containerAvailability.nextAvailableDate!)); setSelectedTime(null); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 13, padding: 0 }}>{new Date(containerAvailability.nextAvailableDate!).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</button></span></>) : `No ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.`}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.some(s => CONTAINER_SIZES.some(c => parseInt(c.id) === s)) && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4, color: "var(--muted)" }}>Or try a different size: {containerAvailability.alternativeSizes.filter(s => CONTAINER_SIZES.some(c => parseInt(c.id) === s)).map(s => <button key={s} onClick={() => { setContainerSize(`${s}yd`); setStep(phases.indexOf("dumpster_size")); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 12, padding: 0 }}>{s}yd³</button>).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, ", ", el], [])}</span>)}</>) : "We couldn\u2019t check availability for this date. You can still book \u2014 we\u2019ll confirm your container and follow up."}
                             </div>
                         )}
                     </div>
@@ -1433,13 +1548,13 @@ export default function BookingWizard({
                                     <div style={{ fontSize: 12, color: "var(--hero-muted, #94A3B8)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, position: "relative", zIndex: 1 }}>
                                         {serviceType === "both" ? "Junk Removal Estimate" : "Estimated Price Range"}
                                     </div>
-                                    {promoResult?.valid && tierData ? (
+                                    {promoDiscountsJunk && tierData ? (
                                         <>
                                             <div style={{ fontSize: 18, color: "var(--hero-muted, #94A3B8)", textDecoration: "line-through", position: "relative", zIndex: 1 }}>
                                                 ${roundTo5(tierData.min + totalAdj)} – ${roundTo5(tierData.max + totalAdj)}
                                             </div>
                                             <div style={{ fontFamily: "var(--heading-font)", fontSize: 44, fontWeight: 800, color: "#10B981", letterSpacing: "-0.03em", position: "relative", zIndex: 1 }}>
-                                                ${applyDiscount(roundTo5(tierData.min + totalAdj))} – ${applyDiscount(roundTo5(tierData.max + totalAdj))}
+                                                ${discountedPriceText(roundTo5(tierData.min + totalAdj))} – ${discountedPriceText(roundTo5(tierData.max + totalAdj))}
                                             </div>
                                         </>
                                     ) : (
@@ -1469,13 +1584,13 @@ export default function BookingWizard({
                                         </div>
                                         {dHasPrice ? (
                                             <>
-                                                {promoResult?.valid ? (
+                                                {promoDiscountsDumpster ? (
                                                     <>
                                                         <div style={{ fontSize: serviceType === "dumpster" ? 18 : 16, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", textDecoration: "line-through" }}>
                                                             {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
                                                         </div>
                                                         <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: "#10B981" }}>
-                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — ${applyDiscount(roundTo5(dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${applyDiscount(roundTo5(dTier.baseRateMax))}` : ""}
+                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText(roundTo5(dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${discountedPriceText(roundTo5(dTier.baseRateMax))}` : ""}
                                                         </div>
                                                     </>
                                                 ) : (
@@ -1499,7 +1614,7 @@ export default function BookingWizard({
                                 );
                             })()}
                             {/* Have a promo code? */}
-                            {!promoResult?.valid && (
+                            {!promoApplies && (
                                 <div style={{ padding: "12px 24px", borderBottom: "1px solid var(--border, #E2E8F0)" }}>
                                     {!promoInputOpen ? (
                                         <button onClick={() => setPromoInputOpen(true)} style={{ background: "none", border: "none", color: "var(--brand)", fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
@@ -1622,12 +1737,16 @@ export default function BookingWizard({
                                     <LockKeyhole size={22} style={{ color: "#16A34A", flexShrink: 0, marginTop: 2 }} />
                                     <div>
                                         <div style={{ fontWeight: 700, fontSize: 15, color: "#166534", marginBottom: 4 }}>
-                                            {paymentPreference === "card" ? "You will NOT be charged today" : "No payment required now"}
+                                            {paymentPreference !== "card"
+                                                ? "No payment required now"
+                                                : (serviceType === "dumpster" || serviceType === "both")
+                                                    ? "Your rental base rate is charged today"
+                                                    : "You will NOT be charged today"}
                                         </div>
                                         <div style={{ fontSize: 13, color: "#166534", lineHeight: 1.5 }}>
                                             {paymentPreference === "card"
-                                                ? (serviceType === "dumpster"
-                                                    ? "Your card is saved securely and will only be charged after the container is delivered to your location."
+                                                ? ((serviceType === "dumpster" || serviceType === "both")
+                                                    ? "Your card is saved securely. The base rate for your rental, plus tax, is charged as soon as your booking is confirmed \u2014 you\u2019ll get a receipt by text. The junk removal itself, and anything extra like additional days, is billed later."
                                                     : "Your card is saved securely and will only be charged after your job is complete. The final price will be confirmed by your crew on-site.")
                                                 : "You\u2019ll pay your crew directly when the job is complete. Cash, check, or card accepted on-site."}
                                         </div>

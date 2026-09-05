@@ -5,11 +5,12 @@
     "type": "module",
     "scripts": {
         "dev": "./node_modules/.bin/vite",
-        "build": "./node_modules/.bin/tsc && ./node_modules/.bin/vite build",
+        "build": "./node_modules/.bin/tsc && ./node_modules/.bin/vite build && node scripts/source-fingerprint.mjs",
         "preview": "./node_modules/.bin/vite preview",
         "release": "npm run build && node scripts/release.mjs",
         "release:copy": "npm run build && node scripts/release.mjs --copy",
-        "check:sync": "node scripts/check-dist-sync.mjs"
+        "check:sync": "node scripts/check-dist-sync.mjs",
+        "test": "node ./scripts/run-tests.mjs"
     },
     "dependencies": {
         "lucide-react": "^0.474.0",

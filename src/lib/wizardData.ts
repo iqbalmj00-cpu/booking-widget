@@ -145,6 +145,11 @@ export type EdgeCase = { id: string; label: string; detail: string };
 export const EDGE_CASES: EdgeCase[] = [
     { id: "heavy",     label: "Extremely heavy or dense items",                  detail: "Concrete, dirt, mattress, hot tub" },
     { id: "specialty", label: "Appliances or E-waste",                           detail: "Refrigerators, freezer, T.V" },
+    // D24. Sits above "no idea" because it is the opposite answer: the customer
+    // knows exactly what they have, and it is more than one truck. Both end in
+    // an on-site estimate, but they reach dispatch as different jobs — see
+    // describeLoadSize / describeEdgeCaseNote in bookingLogic.ts.
+    { id: "multi_load", label: "More than one truck load",                       detail: "Bigger than a packed garage bay" },
     { id: "unknown",   label: "Junk is scattered everywhere / I have no idea",   detail: "" },
 ];
 
