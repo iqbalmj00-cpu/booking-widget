@@ -7,6 +7,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { MapPin, AlertTriangle } from "lucide-react";
+import { loadGoogleMapsLibrary } from "../lib/googleMapsLoader";
 
 /* ── Types ─────────────────────────────────────────────────────────────── */
 export type PlaceResult = {
@@ -46,52 +47,6 @@ const LOAD_TIMEOUT_MS = 5000;
 const MAX_SUGGESTIONS = 5;
 const MIN_INPUT_LENGTH = 3;
 
-/* ── Google Maps Places library loader (Places API New) ────────────────── */
-let placesLibPromise: Promise<any> | null = null;
-
-function loadPlacesLibrary(apiKey: string): Promise<any> {
-    if (placesLibPromise) return placesLibPromise;
-
-    const pending = new Promise<any>((resolve, reject) => {
-        if (typeof window === "undefined") return reject(new Error("SSR"));
-
-        const w = window as any;
-
-        const importPlaces = async () => {
-            try {
-                const lib = await w.google.maps.importLibrary("places");
-                resolve(lib);
-            } catch (e) {
-                reject(e);
-            }
-        };
-
-        if (w.google?.maps?.importLibrary) {
-            importPlaces();
-            return;
-        }
-
-        const script = document.createElement("script");
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&v=weekly`;
-        script.async = true;
-        script.defer = true;
-        script.onload = importPlaces;
-        script.onerror = () => reject(new Error("Failed to load Google Maps"));
-        document.head.appendChild(script);
-    });
-
-    // Never cache a failure. Memoising the rejected promise meant one transient
-    // network error killed address autocomplete for the rest of the page's life,
-    // with no way back short of a reload. Mirrors the same fix in
-    // website-template/lib/googleMapsLoader.ts.
-    placesLibPromise = pending.catch((err) => {
-        placesLibPromise = null;
-        throw err;
-    });
-
-    return placesLibPromise;
-}
-
 /* ── Component ─────────────────────────────────────────────────────────── */
 export default function AddressAutocomplete({
     value, onChange, onPlaceSelect, placeholder,
@@ -115,7 +70,7 @@ export default function AddressAutocomplete({
     useEffect(() => {
         if (!hasApiKey) return;
         const timeoutId = setTimeout(() => setLoadFailed(true), LOAD_TIMEOUT_MS);
-        loadPlacesLibrary(googleMapsKey)
+        loadGoogleMapsLibrary<any>(googleMapsKey, "places")
             .then((lib) => {
                 clearTimeout(timeoutId);
                 placesLibRef.current = lib;

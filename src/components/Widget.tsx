@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { ConfigProvider, type WidgetConfig } from "../lib/config";
 import BookingWizard, { type BookingCompleteData } from "./BookingWizard";
+import { cardConfirmationNotice, deriveDumpsterNote } from "../lib/bookingLogic";
 import { Check } from "lucide-react";
 
 type WidgetProps = {
@@ -23,7 +24,6 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
         // `autoBooked` arrives as undefined rather than false (the wizard sends
         // `dumpsterAutoBooked || undefined`), so test it as falsy, not === false.
         const dumpsterConfirmed = hasDumpster && !!completed.autoBooked;
-        const dumpsterPending = hasDumpster && !completed.autoBooked;
         // A dumpster request the dashboard couldn't auto-approve creates no
         // rental and sends the customer no message at all. Promising one here
         // was the bug: they'd wait for a confirmation that never arrives.
@@ -45,12 +45,18 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
 
         // Only needed alongside a junk booking. On a dumpster-only request the
         // closing line already says a person will be in touch, and saying it
-        // twice reads as padding.
-        const dumpsterNote = !(dumpsterPending && hasJunk)
-            ? null
-            : completed.dumpsterError
-                ? "We couldn't confirm your dumpster automatically. Our team will follow up about your rental shortly."
-                : "We'll confirm dumpster availability and reach out shortly.";
+        // twice reads as padding. Derivation shared with the website's
+        // confirmation page — see lib/bookingLogic.ts.
+        const dumpsterNote = deriveDumpsterNote({
+            serviceType: st,
+            autoBooked: !!completed.autoBooked,
+            dumpsterError: completed.dumpsterError ?? "",
+        });
+
+        // Saving the card can fail after the booking itself succeeded. Every
+        // outcome used to be reported as success; a card that did not save now
+        // says so, without implying the booking is at risk — it is not.
+        const cardNotice = completed.cardIssue ? cardConfirmationNotice(completed.cardIssue) : null;
 
         const closing = requestOnly
             ? "A member of our team will be in touch to confirm your rental."
@@ -80,6 +86,11 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
                     {dumpsterNote && (
                         <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
                             {dumpsterNote}
+                        </p>
+                    )}
+                    {cardNotice && (
+                        <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
+                            {cardNotice}
                         </p>
                     )}
                     <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 16 }}>
