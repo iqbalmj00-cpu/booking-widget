@@ -122,3 +122,7 @@
         font-size: 14px;
     }
 }
+
+/* Native booking choices keep the existing card layout and a visible keyboard focus. */
+.syj-widget-root .booking-choice { font: inherit; color: inherit; text-align: left; min-height: 44px; }
+.syj-widget-root .booking-choice:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }

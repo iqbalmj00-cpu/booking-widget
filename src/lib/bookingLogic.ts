@@ -170,8 +170,7 @@ export function mergeCardConfirmations(
 }
 
 /**
- * What to tell the customer. Never alarming: in every branch the booking
- * itself succeeded, and a card that failed to save was never charged.
+ * A failed/missing card acknowledgement does not establish booking or charge status.
  */
 export function cardConfirmationNotice(outcome: CardConfirmation): string | null {
     switch (outcome) {
@@ -180,14 +179,14 @@ export function cardConfirmationNotice(outcome: CardConfirmation): string | null
         case "already_on_file":
             return "We already had a card on file for you, so we kept it and didn't add the new one. Give us a call if you'd like to change it.";
         case "not_saved_actionable":
-            return "We couldn't save your card, so nothing has been charged. Your booking is confirmed — give us a call and we'll get payment set up.";
+            return "We couldn't confirm that your card was saved. Please call us to check payment status and arrange payment.";
         case "not_saved_unactionable":
-            return "We couldn't save your card, so nothing has been charged. Your booking is confirmed — we'll reach out to arrange payment.";
+            return "We couldn't confirm that your card was saved. Please call us to check payment status and arrange payment.";
         // Deliberately says nothing about the booking: the page above this
         // line already calls a rental awaiting approval a request, not a
         // confirmed booking, and repeating it here would contradict that.
         case "not_saved_pending_approval":
-            return "Nothing has been charged to your card yet. We'll confirm your rental and arrange payment with you before delivery.";
+            return "We couldn't confirm card association for this rental request. Please call us to confirm rental approval and payment status.";
     }
 }
 
@@ -209,7 +208,7 @@ export function deriveDumpsterNote(input: {
     // closing line already says a person will be in touch.
     if (!(dumpsterPending && hasJunk)) return null;
     return dumpsterError
-        ? "We couldn't confirm your dumpster automatically. Our team will follow up about your rental shortly."
+        ? "We couldn't verify that your dumpster request was received. Please call us to check before requesting the rental again. Your junk removal request was received."
         : "We'll confirm dumpster availability and reach out shortly.";
 }
 
@@ -292,7 +291,7 @@ export function validatePhone(value: string): { valid: boolean; error: string } 
 }
 
 /* ── A stale lead id (D25) ────────────────────────────────────────────
- * Both surfaces keep the lead id the first step returned in localStorage
+ * Both surfaces keep the lead id the first step returned in their booking session
  * and send it back on the final submit, so a returning customer updates
  * their own lead instead of spawning a second one. The id outlives the
  * lead it names, though — deleted, merged, or belonging to a different
@@ -336,8 +335,11 @@ const CUSTOMER_READY_PREFIXES = ["Same-day booking"];
  * failed", "Invalid requestedDate", "Internal server error", "CRM error" —
  * and none of it means anything to a customer holding a card.
  */
-export function bookingSubmitErrorMessage(error: unknown): string {
+export function bookingSubmitErrorMessage(error: unknown, status = 0): string {
     const raw = typeof error === "string" ? error.trim() : "";
     if (raw && CUSTOMER_READY_PREFIXES.some(prefix => raw.startsWith(prefix))) return raw;
-    return "We couldn't complete your booking just now. Please try again, or give us a call and we'll take care of it.";
+    if (status === 429) return "Please wait a few minutes before trying again.";
+    if (status === 400) return "Check your contact details, address and selected date, then try again.";
+    if (status === 409) return "That selection could not be accepted. Please review it or call us.";
+    return "We couldn't confirm that your request was received. Please check your connection or call us before submitting again.";
 }

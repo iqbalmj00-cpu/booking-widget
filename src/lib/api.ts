@@ -1,3 +1,4 @@
+import { bookingSubmitErrorMessage } from "./bookingLogic";
 /**
  * api.ts — API client for the booking widget.
  * All calls go directly to the client's dashboard API routes.
@@ -27,32 +28,35 @@ export class ApiError extends Error {
     }
 }
 
+export function customerApiMessage(status: number, code: string): string {
+    return bookingSubmitErrorMessage(code, status);
+}
+
+async function readResponse(res: Response) {
+    const data = await res.json().catch(() => null);
+    const code = typeof data?.error === "string" ? data.error : "";
+    if (!res.ok || !data || typeof data !== "object") {
+        throw new ApiError(customerApiMessage(res.status, code), res.status, code);
+    }
+    return data;
+}
+async function request(url: string, init: RequestInit) {
+    let res: Response;
+    try { res = await fetch(url, init); }
+    catch { throw new ApiError(customerApiMessage(0, ""), 0, ""); }
+    return readResponse(res);
+}
 async function apiPost(path: string, body: Record<string, unknown>, opts: RequestOptions) {
-    const res = await fetch(`${opts.widgetApiUrl}${path}`, {
+    return request(`${opts.widgetApiUrl}${path}`, {
         method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "x-site-token": opts.siteToken,
-        },
+        headers: { "Content-Type": "application/json", "x-site-token": opts.siteToken },
         body: JSON.stringify(body),
     });
-    const data = await res.json();
-    if (!res.ok) throw new ApiError(data.error || `API error: ${path}`, res.status, typeof data.error === "string" ? data.error : "");
-    return data;
 }
-
 async function apiGet(path: string, params: Record<string, string>, opts: RequestOptions) {
     const qs = new URLSearchParams(params).toString();
-    const url = qs ? `${opts.widgetApiUrl}${path}?${qs}` : `${opts.widgetApiUrl}${path}`;
-    const res = await fetch(url, {
-        headers: { "x-site-token": opts.siteToken },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new ApiError(data.error || `API error: ${path}`, res.status, typeof data.error === "string" ? data.error : "");
-    return data;
+    return request(`${opts.widgetApiUrl}${path}${qs ? `?${qs}` : ""}`, { headers: { "x-site-token": opts.siteToken } });
 }
-
-/* ── Public API Methods ────────────────────────────────────────────── */
 
 export const widgetApi = {
     /** Submit booking or lead data to dashboard CRM */

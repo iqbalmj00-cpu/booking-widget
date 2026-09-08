@@ -188,8 +188,8 @@ for (const outcome of ["already_on_file", "not_saved_actionable", "not_saved_una
     assert.ok(!/fail|error|problem/i.test(notice), `${outcome} must not read as an alarm: ${notice}`);
 }
 assert.ok(
-    cardConfirmationNotice("not_saved_actionable")!.includes("nothing has been charged"),
-    "a card that did not save was never charged — say so",
+    cardConfirmationNotice("not_saved_actionable")!.includes("check payment status"),
+    "a missing acknowledgement must not promise a provider charge outcome",
 );
 assert.ok(
     cardConfirmationNotice("already_on_file")!.includes("kept it"),
@@ -203,14 +203,14 @@ assert.strictEqual(
     "We'll confirm dumpster availability and reach out shortly.",
 );
 
-// The regression: the dumpster leg failed, so no request exists to confirm.
+// Lost responses may follow delivery. Do not promise follow-up without an acknowledgement.
 assert.strictEqual(
     deriveDumpsterNote({ serviceType: "both", autoBooked: false, dumpsterError: "Network request failed" }),
-    "We couldn't confirm your dumpster automatically. Our team will follow up about your rental shortly.",
+    "We couldn't verify that your dumpster request was received. Please call us to check before requesting the rental again. Your junk removal request was received.",
 );
 assert.strictEqual(
     deriveDumpsterNote({ serviceType: "both", autoBooked: false, dumpsterError: "Rental request failed" }),
-    "We couldn't confirm your dumpster automatically. Our team will follow up about your rental shortly.",
+    "We couldn't verify that your dumpster request was received. Please call us to check before requesting the rental again. Your junk removal request was received.",
 );
 
 // Nothing to add once the dumpster is actually booked.
@@ -367,7 +367,7 @@ for (const raw of [
 // A dumpster rental the dashboard cannot auto-approve returns no customerId,
 // so confirm-card is never called and nothing is attached or charged.
 const pending = cardConfirmationNotice("not_saved_pending_approval")!;
-assert.ok(pending.includes("charged"), "the customer was promised a charge on confirmation — answer it");
+assert.ok(pending.includes("payment status"), "the customer was promised a charge on confirmation — answer it");
 assert.ok(!/\bsaved\b/i.test(pending), `must not claim a card was saved: ${pending}`);
 assert.ok(!/\b(confirmed|booked)\b/i.test(pending), `the page above already names the booking: ${pending}`);
 

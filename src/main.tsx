@@ -1,3 +1,4 @@
+import { companyMode } from "./lib/bookingFlow";
 /**
  * main.tsx — Widget entry point.
  * Reads configuration from the host page's data attributes,
@@ -105,7 +106,9 @@ async function boot() {
             distanceSurchargePerMile: serverConfig.distanceSurchargePerMile || 0,
             freeRadiusMiles: serverConfig.freeRadiusMiles || 0,
             stripePublishableKey: serverConfig.stripePublishableKey || "",
+            companyMode: companyMode(serverConfig.companyMode, serverConfig.offersDumpsterRental ?? false),
             offersDumpsterRental: serverConfig.offersDumpsterRental ?? false,
+            sameDay: serverConfig.sameDay,
             pricing: serverConfig.pricing || { tiers: [], surcharges: [] },
             dumpsterPricing: serverConfig.dumpsterPricing || null,
             // The dashboard serves `{open,close,closed}`; the wizard reads

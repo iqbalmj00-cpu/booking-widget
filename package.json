@@ -10,7 +10,8 @@
         "release": "npm run build && node scripts/release.mjs",
         "release:copy": "npm run build && node scripts/release.mjs --copy",
         "check:sync": "node scripts/check-dist-sync.mjs",
-        "test": "node ./scripts/run-tests.mjs"
+        "test": "node ./scripts/run-tests.mjs",
+        "test:booking": "node ./tests/booking-regressions.cjs"
     },
     "dependencies": {
         "lucide-react": "^0.474.0",

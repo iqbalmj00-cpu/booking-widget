@@ -31,17 +31,13 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
 
         const when = `${completed.date}${completed.time ? ` during the ${completed.time} window` : ""}`;
 
-        const heading = requestOnly ? "Request Received!" : "Booking Confirmed!";
+        const heading = hasJunk || requestOnly ? "Request Received" : "Rental Confirmed";
 
-        const message = hasJunk && hasDumpster
-            ? dumpsterConfirmed
-                ? `Your junk removal is scheduled for ${when}, and your dumpster is confirmed for delivery.`
-                : `Your junk removal is scheduled for ${when}.`
-            : hasDumpster
-                ? dumpsterConfirmed
-                    ? `Your dumpster is confirmed for delivery on ${when}.`
-                    : `We've received your dumpster rental request for ${when}.`
-                : `Your junk removal is scheduled for ${when}.`;
+        const message = hasJunk
+            ? `Your junk removal request for ${when} was received. Scheduling still needs confirmation.${dumpsterConfirmed ? " Your dumpster is confirmed for delivery." : ""}`
+            : dumpsterConfirmed
+                ? `Your dumpster is confirmed for delivery on ${when}.`
+                : `We've received your dumpster rental request for ${when}. Availability still needs confirmation.`;
 
         // Only needed alongside a junk booking. On a dumpster-only request the
         // closing line already says a person will be in touch, and saying it
@@ -60,10 +56,10 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
 
         const closing = requestOnly
             ? "A member of our team will be in touch to confirm your rental."
-            : "We'll send you a confirmation via text and email shortly.";
+            : "Please check with us if you need to confirm scheduling or payment status.";
 
         return (
-            <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)", padding: 40 }}>
+            <div style={{ minHeight: "60vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--background)", padding: "32px 20px" }}>
                 <div style={{ textAlign: "center", maxWidth: 480 }}>
                     <div style={{ width: 72, height: 72, borderRadius: "50%", background: "linear-gradient(135deg, #059669, #10B981)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px" }}>
                         <Check size={36} color="#fff" />
@@ -76,10 +72,20 @@ export default function Widget({ config, initialPromo, bookingSource }: WidgetPr
                     </p>
                     {completed.price && (
                         <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 20px", marginBottom: 16 }}>
-                            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>Estimated Price</div>
+                            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>Junk removal estimate shown before submission</div>
                             <div style={{ fontSize: 22, fontWeight: 700, color: "var(--foreground)" }}>{completed.price}</div>
                         </div>
                     )}
+                    {hasDumpster && (
+                        <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "16px 20px", marginBottom: 16 }}>
+                            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 4 }}>Dumpster rental — {completed.dumpsterError ? "receipt unverified" : dumpsterConfirmed ? "confirmed" : "requested"}</div>
+                            {completed.dumpsterPrice && <p style={{ fontSize: 20, fontWeight: 700 }}>{completed.dumpsterPrice}</p>}
+                            <p>{completed.debrisType}</p>
+                            {completed.rentalDuration && <p>Duration: {completed.rentalDuration}</p>}
+                        </div>
+                    )}
+                    <p style={{ fontSize: 14, marginBottom: 16 }}>Prices shown are the estimates displayed before submission. The accepted total and any charges have not been confirmed here.{completed.promoRequested ? " Promo eligibility can change; if the code was unavailable, regular pricing applies. Please contact us to confirm the accepted amount." : ""}</p>
+                    {completed.dumpsterError && config.phoneNumber && <a href={`tel:${config.phoneNumber.replace(/[^+\d]/g, "")}`} style={{ display: "inline-block", minHeight: 44 }}>Call to check the rental request</a>}
                     {completed.address && (
                         <p style={{ fontSize: 13, color: "var(--muted)" }}>📍 {completed.address}</p>
                     )}

@@ -5,7 +5,7 @@
  *   - syj-* CSS classes for host-page isolation
  *   - High dropdown z-index for host-page compatibility
  */
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useId } from "react";
 import { MapPin, AlertTriangle } from "lucide-react";
 import { loadGoogleMapsLibrary } from "../lib/googleMapsLoader";
 
@@ -25,6 +25,7 @@ export type PlaceResult = {
 };
 
 type Props = {
+    id?: string;
     value: string;
     onChange: (value: string) => void;
     onPlaceSelect: (place: PlaceResult) => void;
@@ -49,9 +50,12 @@ const MIN_INPUT_LENGTH = 3;
 
 /* ── Component ─────────────────────────────────────────────────────────── */
 export default function AddressAutocomplete({
-    value, onChange, onPlaceSelect, placeholder,
+    value, onChange, onPlaceSelect, placeholder, id,
     googleMapsKey, serviceAreaZips, phoneNumber,
 }: Props) {
+    const generatedId = useId();
+    const inputId = id || generatedId;
+    const listId = `${inputId}-suggestions`;
     const inputRef = useRef<HTMLInputElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,6 +220,9 @@ export default function AddressAutocomplete({
         return (
             <div>
                 <input
+                    id={inputId}
+                    aria-label="Service address"
+                    required
                     className="syj-input"
                     placeholder={placeholder || "1234 Main St, City, State"}
                     value={value}
@@ -237,6 +244,14 @@ export default function AddressAutocomplete({
                     zIndex: 1,
                 }} />
                 <input
+                    id={inputId}
+                    aria-label="Service address"
+                    required
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={suggestions.length > 0}
+                    aria-controls={suggestions.length > 0 ? listId : undefined}
+                    aria-activedescendant={suggestions.length > 0 && highlightedIndex >= 0 ? `${listId}-${highlightedIndex}` : undefined}
                     ref={inputRef}
                     className="syj-input"
                     placeholder={placeholder || "Start typing your address..."}
@@ -249,6 +264,8 @@ export default function AddressAutocomplete({
                 {suggestions.length > 0 && (
                     <ul
                         className="syj-address-dropdown"
+                        id={listId}
+                        aria-label="Address suggestions"
                         role="listbox"
                         style={{
                             position: "absolute", top: "100%", left: 0, right: 0,
@@ -263,6 +280,7 @@ export default function AddressAutocomplete({
                         {suggestions.map((s, i) => (
                             <li
                                 key={s.placeId || i}
+                                id={`${listId}-${i}`}
                                 role="option"
                                 aria-selected={i === highlightedIndex}
                                 onMouseDown={(e) => { e.preventDefault(); handleSuggestionClick(s); }}

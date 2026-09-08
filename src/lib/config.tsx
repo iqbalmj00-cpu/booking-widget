@@ -59,6 +59,8 @@ export type WidgetConfig = {
 
     // Features
     offersDumpsterRental: boolean;
+    companyMode?: import("./bookingFlow").CompanyMode;
+    sameDay?: import("./bookingFlow").SameDayPricing;
 
     // Pricing
     pricing: PricingConfig;
@@ -141,10 +143,10 @@ export function normalizeBusinessHours(raw: unknown): BusinessHoursConfig | null
 /** Round to nearest $5 */
 export function roundTo5(n: number): number { return Math.round(n / 5) * 5; }
 
-/** Format dumpster price as range or "Starting at", rounded to nearest $5 */
+/** Format dumpster price as range or "Starting at", preserving the configured amount */
 export function formatDumpsterPrice(tier: DumpsterPriceTier): string {
-    const min = roundTo5(tier.baseRateMin ?? tier.baseRate);
-    const max = tier.baseRateMax ? roundTo5(tier.baseRateMax) : null;
+    const min = tier.baseRateMin ?? tier.baseRate;
+    const max = tier.baseRateMax ?? null;
     if (max && max > min) return `$${min} – $${max}`;
     return `Starting at $${min}`;
 }
