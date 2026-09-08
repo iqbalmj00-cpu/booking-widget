@@ -163,16 +163,9 @@ export const TIME_SLOTS: TimeSlot[] = [
 
 export type ServiceType = "junk" | "dumpster" | "both";
 
-export type ContainerSize = { id: string; label: string; yards: string; desc: string; goodFor: string; icon: string };
 export type DebrisType = { id: string; label: string; icon: string };
 export type RentalDuration = { id: string; label: string; desc: string };
 
-export const CONTAINER_SIZES: ContainerSize[] = [
-    { id: "10yd", label: "10 Yard", yards: "10 yd³", desc: "About 3 pickup truck loads", goodFor: "Bathroom remodel, small cleanout, garage declutter", icon: "Container" },
-    { id: "20yd", label: "20 Yard", yards: "20 yd³", desc: "About 6 pickup truck loads", goodFor: "Single-room renovation, medium cleanout, roofing (up to 1,500 sq ft)", icon: "Container" },
-    { id: "30yd", label: "30 Yard", yards: "30 yd³", desc: "About 9 pickup truck loads", goodFor: "Multi-room renovation, large estate cleanout, new construction debris", icon: "Container" },
-    { id: "40yd", label: "40 Yard", yards: "40 yd³", desc: "About 12 pickup truck loads", goodFor: "Full house cleanout, major construction, commercial demolition", icon: "Warehouse" },
-];
 
 export const DEBRIS_TYPES: DebrisType[] = [
     { id: "construction", label: "Construction / Demolition", icon: "HardHat" },

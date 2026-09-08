@@ -1,3 +1,4 @@
+import { getContainerSizes, validContainerSelection } from "../lib/containerCatalog";
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { Check, ChevronLeft, ArrowRight, CreditCard, Lock, Truck, CalendarDays, AlertTriangle, LockKeyhole, Hand, Wrench, Box, FileText, Home, Building2 } from "lucide-react";
 import ServiceIcon from "./ServiceIcon";
@@ -17,7 +18,7 @@ import {
 import {
     VOLUME_OPTIONS,
     LOCATION_OPTIONS, TIME_SLOTS,
-    CONTAINER_SIZES, DEBRIS_TYPES, RENTAL_DURATIONS,
+    DEBRIS_TYPES, RENTAL_DURATIONS,
     LOAD_TIERS, EDGE_CASES,
     getPhases, getPhaseLabel, isDayClosed, getAvailableTimeSlots,
     formatSlotTime, composeAddress,
@@ -239,8 +240,9 @@ export default function BookingWizard({
     const [termsAccepted, setTermsAccepted] = useState(saved?.termsAccepted ?? false);
 
     /* ── Dumpster rental state ── */
-    const [serviceType, setServiceType] = useState<ServiceType | null>(saved?.serviceType ?? (config.offersDumpsterRental ? null : "junk"));
-    const [containerSize, setContainerSize] = useState<string | null>(saved?.containerSize ?? null);
+    const [serviceType, setServiceType] = useState<ServiceType | null>(config.offersDumpsterRental ? (saved?.serviceType ?? null) : "junk");
+    const containerSizes = useMemo(() => getContainerSizes(config.dumpsterPricing), [config.dumpsterPricing]);
+    const [containerSize, setContainerSize] = useState<string | null>(() => validContainerSelection(saved?.containerSize, config.dumpsterPricing));
     const [debrisType, setDebrisType] = useState<string | null>(saved?.debrisType ?? null);
     const [rentalDuration, setRentalDuration] = useState<string | null>(saved?.rentalDuration ?? null);
 
@@ -270,7 +272,7 @@ export default function BookingWizard({
     const [paymentPreference, setPaymentPreference] = useState<"card" | "on_site" | null>(saved?.paymentPreference ?? null);
 
     /* ── Phase system ── */
-    const phases = useMemo(() => getPhases(serviceType, config.offersDumpsterRental), [serviceType]);
+    const phases = useMemo(() => getPhases(serviceType, config.offersDumpsterRental), [serviceType, config.offersDumpsterRental]);
     const currentPhase = phases[step] || "contact";
 
     /* ── Stripe card-on-file state ── */
@@ -310,11 +312,11 @@ export default function BookingWizard({
         setDebrisType(null);
         setRentalDuration(null);
         setPaymentPreference(null);
-    }, [serviceType]);
+    }, [serviceType, config.offersDumpsterRental]);
 
     // Check container availability — only fires when date is selected for accurate date-aware check
     useEffect(() => {
-        if (!containerSize || !selectedDate) { setContainerAvailability(null); setAvailabilityState("idle"); return; }
+        if (!containerSize || !validContainerSelection(containerSize, config.dumpsterPricing) || !selectedDate) { setContainerAvailability(null); setAvailabilityState("idle"); return; }
         let cancelled = false;
         setAvailabilityState("checking");
         (async () => {
@@ -338,7 +340,7 @@ export default function BookingWizard({
             }
         })();
         return () => { cancelled = true; };
-    }, [containerSize, selectedDate, rentalDuration]);
+    }, [containerSize, selectedDate, rentalDuration, config.dumpsterPricing]);
 
     // Fetch dynamic time slots when date changes
     useEffect(() => {
@@ -526,6 +528,8 @@ export default function BookingWizard({
     const totalAdj = accessAmount + distanceSurcharge + heavyAmount + applianceAmount;
 
     const canProceed = () => {
+        if ((serviceType === "dumpster" || serviceType === "both") && !config.offersDumpsterRental) return false;
+        if (["dumpster_details", "schedule", "quote"].includes(currentPhase) && (serviceType === "dumpster" || serviceType === "both") && !validContainerSelection(containerSize, config.dumpsterPricing)) return false;
         switch (currentPhase) {
             case "contact": {
                 const hasRequired = !!(contact.name && contact.email && contact.address);
@@ -537,7 +541,7 @@ export default function BookingWizard({
             case "load_estimate":
                 // Volume always required. Access required UNLESS "scattered everywhere" is checked.
                 return volume !== null && (!!edgeCases.unknown || location !== null);
-            case "dumpster_size": return containerSize !== null;
+            case "dumpster_size": return validContainerSelection(containerSize, config.dumpsterPricing) !== null;
             case "dumpster_details": return debrisType !== null && rentalDuration !== null;
             case "schedule": {
                 if (!selectedDate || !selectedTime) return false;
@@ -590,8 +594,28 @@ export default function BookingWizard({
         }
     }, [contact, serviceAddress, addressVerified, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource]);
 
+    useEffect(() => {
+        if (!config.offersDumpsterRental && serviceType !== "junk") {
+            setServiceType("junk"); setContainerSize(null); setStep(0); return;
+        }
+        if ((serviceType === "dumpster" || serviceType === "both") && !validContainerSelection(containerSize, config.dumpsterPricing)) {
+            const sizeStep = phases.indexOf("dumpster_size");
+            if (containerSize !== null) setContainerSize(null);
+            if (sizeStep >= 0 && step > sizeStep) setStep(sizeStep);
+        }
+    }, [containerSize, config.dumpsterPricing, config.offersDumpsterRental, serviceType, phases, step]);
+
     /* ── Final booking submit ─────────────────────────────────────── */
     const handleSubmit = useCallback(async () => {
+        if ((serviceType === "dumpster" || serviceType === "both") && !config.offersDumpsterRental) {
+            setError("Dumpster rental is no longer offered. Please review your service selection.");
+            setStep(0); return;
+        }
+        if ((serviceType === "dumpster" || serviceType === "both") && !validContainerSelection(containerSize, config.dumpsterPricing)) {
+            setError("Choose a currently offered container size before booking.");
+            setStep(phases.indexOf("dumpster_size"));
+            return;
+        }
         setSubmitting(true);
         setError("");
         try {
@@ -758,7 +782,7 @@ export default function BookingWizard({
 
             /* ── DUMPSTER RENTAL payload ── */
             const sendDumpsterLead = async (): Promise<{ autoBooked?: boolean }> => {
-                const containerLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || containerSize || "";
+                const containerLabel = containerSizes.find(c => c.id === containerSize)?.label || containerSize || "";
                 const debrisLabel = DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType || "";
                 const durationLabel = RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration || "";
                 const description = `${containerLabel} dumpster, ${debrisLabel}, ${durationLabel}`;
@@ -854,7 +878,7 @@ export default function BookingWizard({
                     const sizeNum = containerSize ? parseInt(containerSize) : 0;
                     const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
                     if (dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0))) {
-                        const sizeLabel = CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "";
+                        const sizeLabel = containerSizes.find(c => c.id === containerSize)?.label || "";
                         // formatDumpsterPrice is the list price; when a promo
                         // covers this leg the quote step showed less than that.
                         const dMin = roundTo5(dTier.baseRateMin ?? dTier.baseRate);
@@ -899,7 +923,7 @@ export default function BookingWizard({
         } finally {
             setSubmitting(false);
         }
-    }, [contact, serviceAddress, addressVerified, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, promoResult, promoDiscountsJunk, promoDiscountsDumpster, paymentPreference, bookingSource, isOnSiteEstimate, multiTruckLoad, availabilityState, apiOpts, config.dumpsterPricing]);
+    }, [contact, serviceAddress, addressVerified, tierIndex, edgeCases, volume, location, selectedDate, selectedTime, tierData, accessAmount, distanceSurcharge, totalAdj, accessSurcharge, heavySurcharge, applianceSurcharge, heavyAmount, applianceAmount, onComplete, serviceType, containerSize, debrisType, rentalDuration, setupClientSecret, promoCode, promoResult, promoDiscountsJunk, promoDiscountsDumpster, paymentPreference, bookingSource, isOnSiteEstimate, multiTruckLoad, availabilityState, apiOpts, config.dumpsterPricing, config.offersDumpsterRental, containerSizes, phases]);
 
     const formatPhone = (val: string) => {
         const digits = val.replace(/\D/g, "").slice(0, 10);
@@ -1369,7 +1393,8 @@ export default function BookingWizard({
                             <p style={{ color: "var(--muted)", fontSize: 15 }}>Choose the dumpster size that best fits your project.</p>
                         </div>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 14 }}>
-                            {CONTAINER_SIZES.map(cs => {
+                            {containerSizes.length === 0 && <p role="status">Container sizes are being updated. Please contact us to arrange a rental.</p>}
+                            {containerSizes.map(cs => {
                                 const sizeNum = parseInt(cs.id);
                                 const tier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
                                 const hasPrice = tier && (tier.baseRate > 0 || (tier.baseRateMin != null && tier.baseRateMin > 0));
@@ -1521,7 +1546,7 @@ export default function BookingWizard({
                         {/* Date-specific availability indicator for dumpster rentals */}
                         {selectedDate && (serviceType === "dumpster" || serviceType === "both") && containerSize && availabilityState !== "idle" && (
                             <div style={{ marginTop: 16, padding: "14px 18px", borderRadius: 12, textAlign: "center", fontSize: 14, fontWeight: 600, ...(availabilityState === "checking" ? { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" } : availabilityState === "available" ? { background: "#F0FDF4", border: "1px solid #BBF7D0", color: "#16A34A" } : availabilityState === "unavailable" ? { background: "#FEF2F2", border: "1px solid #FECACA", color: "#DC2626" } : { background: "#F8FAFC", border: "1px solid #E2E8F0", color: "var(--muted)" }) }}>
-                                {availabilityState === "checking" ? "Checking availability for your date..." : availabilityState === "available" ? `✓ ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "Container"} available for ${selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : availabilityState === "unavailable" && containerAvailability ? (<><AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} />{containerAvailability.nextAvailableDate ? (<>No {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.<span style={{ display: "block", fontSize: 13, fontWeight: 500, marginTop: 6 }}>Next available: <button onClick={() => { setSelectedDate(new Date(containerAvailability.nextAvailableDate!)); setSelectedTime(null); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 13, padding: 0 }}>{new Date(containerAvailability.nextAvailableDate!).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</button></span></>) : `No ${CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "containers"} available for this date.`}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.some(s => CONTAINER_SIZES.some(c => parseInt(c.id) === s)) && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4, color: "var(--muted)" }}>Or try a different size: {containerAvailability.alternativeSizes.filter(s => CONTAINER_SIZES.some(c => parseInt(c.id) === s)).map(s => <button key={s} onClick={() => { setContainerSize(`${s}yd`); setStep(phases.indexOf("dumpster_size")); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 12, padding: 0 }}>{s}yd³</button>).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, ", ", el], [])}</span>)}</>) : "We couldn\u2019t check availability for this date. You can still book \u2014 we\u2019ll confirm your container and follow up."}
+                                {availabilityState === "checking" ? "Checking availability for your date..." : availabilityState === "available" ? `✓ ${containerSizes.find(c => c.id === containerSize)?.label || "Container"} available for ${selectedDate.toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : availabilityState === "unavailable" && containerAvailability ? (<><AlertTriangle size={16} style={{ display: "inline", verticalAlign: "middle", marginRight: 6 }} />{containerAvailability.nextAvailableDate ? (<>No {containerSizes.find(c => c.id === containerSize)?.label || "containers"} available for this date.<span style={{ display: "block", fontSize: 13, fontWeight: 500, marginTop: 6 }}>Next available: <button onClick={() => { setSelectedDate(new Date(containerAvailability.nextAvailableDate!)); setSelectedTime(null); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 13, padding: 0 }}>{new Date(containerAvailability.nextAvailableDate!).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</button></span></>) : `No ${containerSizes.find(c => c.id === containerSize)?.label || "containers"} available for this date.`}{containerAvailability.alternativeSizes && containerAvailability.alternativeSizes.some(s => containerSizes.some(c => parseInt(c.id) === s)) && (<span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4, color: "var(--muted)" }}>Or try a different size: {containerAvailability.alternativeSizes.filter(s => containerSizes.some(c => parseInt(c.id) === s)).map(s => <button key={s} onClick={() => { setContainerSize(`${s}yd`); setStep(phases.indexOf("dumpster_size")); }} style={{ background: "none", border: "none", color: "var(--brand)", fontWeight: 700, cursor: "pointer", textDecoration: "underline", fontFamily: "inherit", fontSize: 12, padding: 0 }}>{s}yd³</button>).reduce<React.ReactNode[]>((acc, el, i) => i === 0 ? [el] : [...acc, ", ", el], [])}</span>)}</>) : "We couldn\u2019t check availability for this date. You can still book \u2014 we\u2019ll confirm your container and follow up."}
                             </div>
                         )}
                     </div>
@@ -1587,15 +1612,15 @@ export default function BookingWizard({
                                                 {promoDiscountsDumpster ? (
                                                     <>
                                                         <div style={{ fontSize: serviceType === "dumpster" ? 18 : 16, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", textDecoration: "line-through" }}>
-                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
                                                         </div>
                                                         <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: "#10B981" }}>
-                                                            {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText(roundTo5(dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${discountedPriceText(roundTo5(dTier.baseRateMax))}` : ""}
+                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText(roundTo5(dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${discountedPriceText(roundTo5(dTier.baseRateMax))}` : ""}
                                                         </div>
                                                     </>
                                                 ) : (
                                                     <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: serviceType === "dumpster" ? "var(--hero-text)" : "#92400E" }}>
-                                                        {CONTAINER_SIZES.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                        {containerSizes.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
                                                     </div>
                                                 )}
                                                 <div style={{ fontSize: 12, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", marginTop: 4 }}>
@@ -1658,7 +1683,7 @@ export default function BookingWizard({
                                     }
                                     if (serviceType === "dumpster" || serviceType === "both") {
                                         rows.push(
-                                            { label: "Container", value: CONTAINER_SIZES.find(c => c.id === containerSize)?.label || "—" },
+                                            { label: "Container", value: containerSizes.find(c => c.id === containerSize)?.label || "—" },
                                             { label: "Debris Type", value: DEBRIS_TYPES.find(d => d.id === debrisType)?.label || "—" },
                                             { label: "Duration", value: RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || "—" },
                                         );
