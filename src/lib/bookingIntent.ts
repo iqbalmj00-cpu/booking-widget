@@ -1,3 +1,4 @@
+import { readRentalTerms, type RentalTerms } from "./rentalPricing";
 /** Durable, per-service booking recovery. No contact data belongs in URLs or analytics. */
 export type ServiceLeg = "junk" | "dumpster";
 export type BookingEnvelope = { status: number; data: unknown; retryAfter?: string | null };
@@ -6,7 +7,7 @@ export type BookingOutcome = {
     success: boolean; leadId: string | null; jobId: string | null; rentalId: string | null; customerId: string | null;
     code: string; httpStatus: number; retryAt: number | null;
     schedule: { timezone: string; calendarDate: string | null; date: string | null; start: string | null; windowStart: string | null; windowEnd: string | null; timeSlot: string | null; planStatus: string | null } | null;
-    rental: { status: string | null; deliveryJobId: string | null; deliveryStatus: string | null; deliveryCompleted: boolean } | null;
+    rental: ({ status: string | null; deliveryJobId: string | null; deliveryStatus: string | null; deliveryCompleted: boolean } & RentalTerms) | null;
     pricing: { status: "accepted" | "unknown"; subtotal: number | null; subtotalMax: number | null; base: number | null; discount: number | null; fees: { kind: string; amount: number }[]; promo: { status: string }; tax: null; total: null };
     payment: { status: "unknown" }; alternatives: { date: string; slot: string | null; start: string | null; end: string | null }[];
 };
@@ -53,7 +54,7 @@ export function readOutcome(envelope: BookingEnvelope, service: ServiceLeg): Boo
         code: str(d.code) ?? "", httpStatus: envelope.status, retryAt,
         schedule: version && timezone ? { timezone, calendarDate: typeof s.calendarDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.calendarDate) ? s.calendarDate : null,
             date: instant(s.date), start: instant(s.start), windowStart: instant(s.windowStart), windowEnd: instant(s.windowEnd), timeSlot: str(s.timeSlot), planStatus: str(s.planStatus) } : null,
-        rental: version && rentalId ? { status: str(r.status), deliveryJobId: str(r.deliveryJobId), deliveryStatus: str(r.deliveryStatus), deliveryCompleted: r.deliveryCompleted === true || r.deliveryStatus === "completed" } : null,
+        rental: version && rentalId ? { ...readRentalTerms(r), status: str(r.status), deliveryJobId: str(r.deliveryJobId), deliveryStatus: str(r.deliveryStatus), deliveryCompleted: r.deliveryCompleted === true || r.deliveryStatus === "completed" } : null,
         pricing: { status: subtotal == null ? "unknown" : "accepted", subtotal, subtotalMax: subtotal != null && max != null && max >= subtotal ? max : null,
             base: acceptedPrice ? money(p.base) : null, discount: acceptedPrice ? money(p.discount) : null,
             fees: acceptedPrice && Array.isArray(p.fees) ? p.fees.flatMap(f => { const fee = obj(f); return str(fee.kind) && money(fee.amount) != null ? [{ kind: String(fee.kind), amount: Number(fee.amount) }] : []; }) : [],

@@ -143,10 +143,9 @@ export function normalizeBusinessHours(raw: unknown): BusinessHoursConfig | null
 /** Round to nearest $5 */
 export function roundTo5(n: number): number { return Math.round(n / 5) * 5; }
 
-/** Format dumpster price as range or "Starting at", preserving the configured amount */
+/** Match rental acceptance: baseRateMin ?? baseRate; baseRateMax is not charged. */
 export function formatDumpsterPrice(tier: DumpsterPriceTier): string {
     const min = tier.baseRateMin ?? tier.baseRate;
-    const max = tier.baseRateMax ?? null;
-    if (max && max > min) return `$${min} – $${max}`;
-    return `Starting at $${min}`;
+    if (!Number.isFinite(min) || min <= 0) return "Rental price needs confirmation";
+    return `$${min}`;
 }
