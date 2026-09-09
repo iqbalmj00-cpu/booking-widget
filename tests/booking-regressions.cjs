@@ -18,7 +18,7 @@ const deny = () => { throw new Error('Unexpected outbound fetch'); };
 
 function loader(mocks = {}, globals = {}) {
     const cache = new Map();
-    const context = vm.createContext({ console, URL, URLSearchParams, Date:FixtureDate, Intl, Promise, setTimeout, clearTimeout, performance: { getEntriesByType: () => [{ type: 'reload' }] }, process: { env: {} }, fetch: deny, ...globals });
+    const context = vm.createContext({ console, crypto:require("node:crypto").webcrypto, URL, URLSearchParams, Date:FixtureDate, Intl, Promise, setTimeout, clearTimeout, performance: { getEntriesByType: () => [{ type: 'reload' }] }, process: { env: {} }, fetch: deny, ...globals });
     function load(file) {
         file = path.resolve(file);
         if (mocks[file]) return mocks[file];
@@ -56,15 +56,15 @@ function hooks() {
         useEffect(fn,deps) { const i=index++; if(!state[i] || !equal(state[i].deps,deps)){const old=state[i];state[i]={deps};pending.push(()=>{old?.cleanup?.();state[i].cleanup=fn();});} },
     };
     const render = () => { index=0; pending=[]; changed=false; result=renderFn(); for(const effect of pending)effect(); return result; };
-    return { api, mount(fn){renderFn=fn;render();}, async flush(){ for(let i=0;i<30;i++){await Promise.resolve();if(changed)render();} return result; }, get tree(){return result;}, unmount(){for(const s of state)s?.cleanup?.();} };
+    return { api, mount(fn){renderFn=fn;render();}, async flush(){ for(let i=0;i<100;i++){await Promise.resolve();if(changed)render();} return result; }, get tree(){return result;}, unmount(){for(const s of state)s?.cleanup?.();} };
 }
 function nodes(tree) { const out=[]; function walk(n){if(Array.isArray(n))n.forEach(walk);else if(n && typeof n==='object' && n.props){out.push(n);walk(n.props.children);}}walk(tree);return out; }
-function text(tree) { if(Array.isArray(tree))return tree.map(text).join(''); if(tree?.props)return text(tree.props.children); return typeof tree==='string'||typeof tree==='number'?String(tree):''; }
+function text(tree) { if(tree?.type?.name === "BookingReceipt") return renderToStaticMarkup(tree); if(Array.isArray(tree))return tree.map(text).join(''); if(tree?.props)return text(tree.props.children); return typeof tree==='string'||typeof tree==='number'?String(tree):''; }
 function button(tree, label) { const el=nodes(tree).find(n=>n.type==='button' && text(n).includes(label));assert.ok(el,`Button ${label} exists`);return el; }
 const memory = initial => { const values=new Map(Object.entries(initial));return {getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)}; };
 const later = () => {let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 
-async function main() {
+async function main(mainOptions = {}) {
     const basic = loader();
     const flow = basic.load(path.join(source,'lib/bookingFlow.ts'));
     assert.equal(flow.allowedService('both',flow.companyMode('dumpster_rental',true)),'dumpster');
@@ -114,20 +114,22 @@ async function main() {
     function wizardFixture(saved=defaultSaved,options={}) {
         const effectiveConfig={...config,...options.config};
         const h=hooks(), calls=[], events={}, history={state:{host:'preserved'},replaceState(value){this.state=value;},pushState(value){this.state=value;},back(){}};
-        const storage=memory({[widget?'syjBookingWizard:fixture-only':'syjBookingWizard']:JSON.stringify(saved)});
+        const storage=options.storage || memory({[widget?'syjBookingWizard:fixture-only':'syjBookingWizard']:JSON.stringify(saved)});
         let completion; const route={useRouter:()=>({push:p=>calls.push({redirect:p})}),useSearchParams:()=>new URLSearchParams(),notFound:()=>{throw new Error('404');}};
         const respond=async(url,init={})=>{calls.push({url,body:init.body?JSON.parse(init.body):null});
             if(url.includes('available-slots'))return options.slots?options.slots(url):{ok:true,status:200,json:async()=>({slots:[{start:'08:00',end:'10:00',label:'Morning',available:true}],sameDay:{isSameDay:true,surchargeType:'flat',surchargeAmount:25}})};
             if(url.includes('container-availability'))return options.availability?options.availability():{ok:true,status:200,json:async()=>({available:true})};
             if(url.includes('crm')||url.includes('ingest/website'))return options.submit?options.submit(init):{ok:true,status:200,json:async()=>({success:true,leadId:saved.leadId||'fresh-fixture',autoBooked:true})};
+            if(url.includes('confirm-card'))return options.confirmCard ? options.confirmCard(init) : {ok:true,status:200,json:async()=>({success:true})};
             if(url.includes('promo'))return {ok:true,status:200,json:async()=>({valid:true,appliesTo:'both',discountType:'percentage',discountValue:20})};
             throw new Error(`Unmocked fixture request ${url}`);
         };
-        const lm=loader({react:h.api,'next/navigation':route,[path.join(source,widget?'lib/config.tsx':'lib/siteConfig.ts')]:{...configModule,siteConfig:effectiveConfig,hasConfiguredPricing:()=>effectiveConfig.pricingConfigured,useConfig:()=>effectiveConfig},[path.join(source,widget?'components/VolumeEstimator.tsx':'components/booking/VolumeEstimator.tsx')]:{VolumeEstimator:()=>null},'@stripe/stripe-js':{loadStripe:deny}}, {window:{history,addEventListener:(e,fn)=>events[e]=fn,removeEventListener:()=>{}},sessionStorage:storage,localStorage:{getItem:()=>{throw new Error('Origin-wide lead read');},setItem:()=>{throw new Error('Origin-wide lead write');}},fetch:respond});
+        const lm=loader({react:h.api,'next/navigation':route,[path.join(source,widget?'lib/config.tsx':'lib/siteConfig.ts')]:{...configModule,siteConfig:effectiveConfig,hasConfiguredPricing:()=>effectiveConfig.pricingConfigured,useConfig:()=>effectiveConfig},[path.join(source,widget?'components/VolumeEstimator.tsx':'components/booking/VolumeEstimator.tsx')]:{VolumeEstimator:()=>null},'@stripe/stripe-js':{loadStripe:deny},...(options.card ? {[path.join(source,'lib/booking/useBookingCard.ts')]:{useBookingCard:(key,active)=>{options.card.active?.(active);return options.card;}}} : {})}, {window:{history,location:{reload:()=>calls.push({reload:true})},gtag:(command,event,params)=>calls.push({event,params}),addEventListener:(e,fn)=>events[e]=fn,removeEventListener:()=>{}},sessionStorage:storage,localStorage:{getItem:()=>{throw new Error('Origin-wide lead read');},setItem:()=>{throw new Error('Origin-wide lead write');}},fetch:respond,...(options.fastTimers ? {setTimeout:fn=>{Promise.resolve().then(fn);return 0;},clearTimeout:()=>{}} : {})});
         const Wizard=lm.load(path.join(source,'components/BookingWizard.tsx')).default;
         h.mount(()=>Wizard({onComplete:data=>completion=data}));
         return {h,calls,events,history,storage,get completion(){return completion;}};
     }
+    if (mainOptions.harness) return {wizardFixture,defaultSaved,button,loader,source,config,hooks,memory,text,nodes,widget};
     const f=wizardFixture();await f.h.flush();
     assert.equal(button(f.h.tree,'Continue').props.disabled,false);
     button(f.h.tree,'Continue').props.onClick();await f.h.flush();
@@ -138,7 +140,7 @@ async function main() {
     assert.equal(posts[0].body.value,200);assert.equal(posts[1].body.value,372);
     assert.equal(posts[0].body.requestedDate,'2026-09-20');
     const completed=widget?f.completion:JSON.parse(f.storage.getItem('syjBookingConfirmation'));
-    assert.equal(completed.pricingUnconfirmed,true);assert.match(completed.price,/225/);
+    assert.equal(completed.pricingUnconfirmed,true);assert.equal(completed.price,'');assert.equal(completed.outcomes.junk.outcome,'request_saved');
     f.h.unmount();
 
     // A restored unoffered time and a delayed/refused rental cannot submit.
@@ -170,7 +172,7 @@ async function main() {
 
     const partial=wizardFixture({...defaultSaved,step:6},{submit:init=>{const body=JSON.parse(init.body);if(body.type==='rental_lead')throw new Error('Lost response');return {ok:true,status:200,json:async()=>({success:true,leadId:'partial-fixture'})};}});
     await partial.h.flush();button(partial.h.tree,'Confirm & Book').props.onClick();await partial.h.flush();
-    const partialData=widget?partial.completion:JSON.parse(partial.storage.getItem('syjBookingConfirmation'));assert.ok(partialData.dumpsterError);assert.equal(partialData.autoBooked,undefined);partial.h.unmount();
+    const partialData=widget?partial.completion:JSON.parse(partial.storage.getItem('syjBookingConfirmation'));assert.ok(!partialData);const partialDraft=JSON.parse(partial.storage.getItem(widget?'syjBookingWizard:fixture-only':'syjBookingWizard'));assert.equal(partialDraft.intent.attempts.junk.acknowledgement.outcome,'request_saved');assert.equal(partialDraft.intent.attempts.dumpster.acknowledgement.outcome,'uncertain');partial.h.unmount();
 
     const refused=wizardFixture({...defaultSaved,step:6},{submit:()=>({ok:true,status:200,json:async()=>({success:false,rejected:true,leadId:'fixture'})})});
     await refused.h.flush();button(refused.h.tree,'Confirm & Book').props.onClick();await refused.h.flush();assert.ok(!refused.completion);assert.equal(refused.calls.filter(c=>c.redirect).length,0);refused.h.unmount();
@@ -195,7 +197,7 @@ async function main() {
     assert.equal(missingDetails.calls.filter(c=>c.body?.type).length,0);assert.match(text(missingDetails.h.tree),/Household Junk/);missingDetails.h.unmount();
 
     // Customer recovery messages must survive the API helper and final-submit handler.
-    for(const [status,pattern] of [[400,/Check your contact details/],[409,/could not be accepted/],[429,/wait a few minutes/],[500,/before submitting again/]]) {
+    for(const [status,pattern] of [[400,/Check your contact details/],[409,/Check your contact details/],[429,/wait a few minutes/],[500,/before submitting again/]]) {
         const failure=wizardFixture({...defaultSaved,step:6},{submit:()=>({ok:false,status,json:async()=>({error:'Internal fixture diagnostic'})})});await failure.h.flush();
         button(failure.h.tree,'Confirm & Book').props.onClick();await failure.h.flush();assert.match(text(failure.h.tree),pattern);assert.ok(!text(failure.h.tree).includes('Internal fixture diagnostic'));failure.h.unmount();
     }
@@ -208,13 +210,14 @@ async function main() {
     assert.equal(onsite.calls.find(c=>c.body?.type==='booking').body.value,undefined);onsite.h.unmount();
 
     if(widget) {
+        let shownState = 0;
         const response=loader({}, {fetch:async()=>({ok:false,status:500,json:async()=>({error:'Internal database error'})})}).load(path.join(source,'lib/api.ts'));
         await assert.rejects(response.widgetApi.submitBooking({},config),e=>!e.message.includes('database')&&e.status===500);
         const invalid=loader({}, {fetch:async()=>({ok:true,status:200,json:async()=>{throw new Error('Unexpected token <')}})}).load(path.join(source,'lib/api.ts'));
         await assert.rejects(invalid.widgetApi.submitBooking({},config),e=>!e.message.includes('Unexpected token'));
-        const show=loader({react:{...React,useState:()=>[{name:'Fixture',date:'September 20',time:'Morning',price:'$225',serviceType:'both',dumpsterPrice:'15 yard — $372',debrisType:'Household Junk',rentalDuration:'About a week',dumpsterError:'uncertain',promoRequested:'FIXTURE'},()=>{}]},[path.join(source,'components/BookingWizard.tsx')]:{__esModule:true,default:()=>null}},{}).load(path.join(source,'components/Widget.tsx')).default;
+        const show=loader({react:{...React,useState:()=>[shownState++ === 0 ? {name:'Fixture',date:'September 20',time:'Morning',price:'$225',serviceType:'both',dumpsterPrice:'15 yard — $372',debrisType:'Household Junk',rentalDuration:'About a week',dumpsterError:'uncertain',promoRequested:'FIXTURE'} : '',()=>{}]},[path.join(source,'components/BookingWizard.tsx')]:{__esModule:true,default:()=>null}},{}).load(path.join(source,'components/Widget.tsx')).default;
         const markup=renderToStaticMarkup(React.createElement(show,{config}));
-        for(const value of ['$372','Household Junk','About a week','Scheduling still needs confirmation','Please call','regular pricing'])assert.ok(markup.includes(value),value);
+        for(const value of ['Household Junk','About a week','has not received an acknowledgement','Call to review'])assert.ok(markup.includes(value),value);
         assert.ok(!markup.includes('junk removal is scheduled'));
     } else {
         const contactHooks=hooks(), fieldValues={fname:'',lname:'',phone:''};let sent=0,focused='';
@@ -236,4 +239,5 @@ async function main() {
     }
     console.log(`${widget?'Widget':'Website'} booking regressions passed (isolated source + mocked effects/requests; no provider runtime).`);
 }
-main().catch(error=>{console.error(error);process.exitCode=1;});
+module.exports = main;
+if (require.main === module) main().then(() => require("./booking-recovery.cjs")()).catch(error=>{console.error(error);process.exitCode=1;});

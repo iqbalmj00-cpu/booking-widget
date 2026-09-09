@@ -1,3 +1,5 @@
+import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
+import BookingReceipt from "./BookingReceipt";
 import { getContainerSizes, validContainerSelection } from "../lib/containerCatalog";
 import { useState, useCallback, useMemo, useEffect, useRef, useId } from "react";
 import { Check, ChevronLeft, ArrowRight, CreditCard, Lock, Truck, CalendarDays, AlertTriangle, LockKeyhole, Hand, Wrench, Box, FileText, Home, Building2 } from "lucide-react";
@@ -13,7 +15,7 @@ import {
     classifyCardConfirmation, mergeCardConfirmations, type CardConfirmation,
     classifyAvailabilityResponse, availabilityBlocksBooking, type AvailabilityState,
     describeLoadSize, describeEdgeCaseNote, validatePhone, MULTI_LOAD_EDGE_CASE_ID,
-    isStaleLeadResponse, bookingSubmitErrorMessage,
+    bookingSubmitErrorMessage,
 } from "../lib/bookingLogic";
 import {
     VOLUME_OPTIONS,
@@ -25,7 +27,7 @@ import {
     type ServiceType, type WizardPhase, type DynamicSlot,
 } from "../lib/wizardData";
 import { useBookingCard } from "../lib/booking/useBookingCard";
-import { calendarDate, restoreCalendarDate, companyMode, allowedService, reconcileStep, validSlotSelection, addSameDayFee, acknowledgedRequest } from "../lib/bookingFlow";
+import { calendarDate, restoreCalendarDate, companyMode, allowedService, reconcileStep, validSlotSelection, addSameDayFee } from "../lib/bookingFlow";
 
 export type BookingCompleteData = {
     name: string; date: string; time: string; price: string;
@@ -33,16 +35,7 @@ export type BookingCompleteData = {
     debrisType?: string; rentalDuration?: string; autoBooked?: boolean;
     dumpsterError?: string; cardIssue?: CardConfirmation;
     pricingUnconfirmed?: boolean; promoRequested?: string;
-};
-
-/** The fields the booking endpoint answers with that this wizard reads. */
-type BookingResponse = {
-    success?: boolean;
-    rejected?: boolean;
-    message?: string;
-    leadId?: string;
-    customerId?: string;
-    autoBooked?: boolean;
+    outcomes?: Partial<Record<ServiceLeg, BookingOutcome>>;
 };
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
@@ -169,16 +162,9 @@ const WIZARD_STORAGE_KEY = "syjBookingWizard";
 function loadSavedWizard(storageKey: string) {
     if (typeof window === "undefined") return null;
     try {
-        // Only restore on actual page refresh (F5), not fresh navigation to /book
-        const navEntries = performance.getEntriesByType("navigation") as PerformanceNavigationTiming[];
-        const isReload = navEntries.length > 0 && navEntries[0].type === "reload";
-        if (!isReload) {
-            sessionStorage.removeItem(storageKey);
-            return null;
-        }
         const raw = sessionStorage.getItem(storageKey);
-        return raw ? JSON.parse(raw) : null;
-    } catch { return null; }
+        return readWizardDraft(raw);
+    } catch { return { recoveryBlocked: true }; }
 }
 
 /* ── Main Wizard ───────────────────────────────────────────────────────── */
@@ -199,6 +185,17 @@ export default function BookingWizard({
     }), [config.siteToken, config.widgetApiUrl]);
     const storageKey = `${WIZARD_STORAGE_KEY}:${config.siteToken}`;
     const [saved] = useState(() => loadSavedWizard(storageKey));
+    const [hydrated, setHydrated] = useState(false);
+    useEffect(() => setHydrated(true), []);
+    const [intent] = useState(() => restoreIntent(saved));
+    const [, refreshIntent] = useState(0);
+    const changedIntent = () => refreshIntent(n => n + 1);
+    const persistIntent = useCallback(() => saveIntent(storageKey, intent), [intent, storageKey]);
+    const sendingRef = useRef(false);
+    const freshBooking = () => {
+        try { sessionStorage.removeItem(storageKey); sessionStorage.removeItem(`${storageKey}:receipt`); window.location.reload(); }
+        catch { setError(STORAGE_MESSAGE); }
+    };
     const fieldId = useId();
     const mode = config.offersDumpsterRental ? companyMode(config.companyMode, true) : "junk_removal";
     const leadIdRef = useRef<string | null>(typeof saved?.leadId === "string" ? saved.leadId : null);
@@ -288,13 +285,14 @@ export default function BookingWizard({
         return widgetApi.createSetupIntent(apiOpts);
     }, [apiOpts]);
     const { stripeReady, cardComplete, cardError, setupError, retryCard, setupClientSecret, stripeRef, cardRef, cardMountRef } =
-        useBookingCard(config.stripePublishableKey, currentPhase === "quote" && paymentPreference === "card", createCardSetup);
+        useBookingCard(config.stripePublishableKey, currentPhase === "quote" && paymentPreference === "card" && !hasAttempts(intent), createCardSetup);
 
     const rememberLead = useCallback((id: string | null) => {
         leadIdRef.current = id;
+        intent.leadId = id;
         try {
             const raw = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
-            sessionStorage.setItem(storageKey, JSON.stringify({ ...raw, leadId: id }));
+            sessionStorage.setItem(storageKey, JSON.stringify({ ...raw, leadId: id, intent }));
         } catch {}
     }, [storageKey]);
 
@@ -303,7 +301,7 @@ export default function BookingWizard({
         const data = {
             step, tierIndex, edgeCases, volume, location,
             selectedDate: selectedDate ? calendarDate(selectedDate) : null,
-            leadId: leadIdRef.current,
+            leadId: intent.leadId, intent,
             selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
             termsAccepted, serviceType, containerSize, debrisType,
             rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
@@ -314,7 +312,7 @@ export default function BookingWizard({
         selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
         termsAccepted, serviceType, containerSize, debrisType,
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
-        addressConfirmed, addressVerified]);
+        addressConfirmed, addressVerified, intent, storageKey]);
 
     // A booking switched to junk-only must not keep its dumpster answers: they
     // would otherwise ride along in the payload and the confirmation. Only
@@ -549,7 +547,10 @@ export default function BookingWizard({
         setSubmitting(true);
         setError("");
         try {
-            const data = await widgetApi.submitBooking({
+            if (intent.blocked) throw new Error("Your saved booking needs review. Please call us before booking again.");
+            if (!intent.capture || canReviseCapture(intent)) intent.capture = {
+                intent: "capture", ...(intent.bookingSessionId ? { bookingSessionId: intent.bookingSessionId } : {}),
+                ...(intent.leadId ? { leadId: intent.leadId } : {}),
                 name: contact.name,
                 phone: contact.phone,
                 email: contact.email,
@@ -563,8 +564,16 @@ export default function BookingWizard({
                     ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
                     ...(addressVerified ? {} : { addressVerified: false }),
                 },
-            }, apiOpts);
-            if (!acknowledgedRequest(data)) throw new Error("We couldn't verify whether your details were received. Please call before submitting again.");
+
+            };
+            // Persist uncertainty before sending, so reload cannot reuse an old refusal to edit an in-flight request.
+            intent.captureAcknowledgement = readOutcome({ status: 0, data: null }, "junk");
+            if (!persistIntent()) throw new Error(STORAGE_MESSAGE);
+            const envelope = await widgetApi.submitBookingResponse(intent.capture, apiOpts);
+            const data = readOutcome(envelope, "junk");
+            intent.captureAcknowledgement = data;
+            if (!persistIntent()) throw new Error(STORAGE_MESSAGE);
+            if (!resolvedOutcome(data)) throw new Error(bookingSubmitErrorMessage(data.code, envelope.status));
             if (data.leadId) rememberLead(data.leadId);
             if (data.customerId) setStoredCustomerId(data.customerId);
             setLeadCaptured(true);
@@ -574,7 +583,7 @@ export default function BookingWizard({
         } finally {
             setSubmitting(false);
         }
-    }, [contact, serviceAddress, addressVerified, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource]);
+    }, [contact, serviceAddress, addressVerified, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource, intent, persistIntent, rememberLead]);
 
     useEffect(() => {
         if (allowedService(serviceType, mode) !== serviceType) {
@@ -589,44 +598,41 @@ export default function BookingWizard({
 
     /* ── Final booking submit ─────────────────────────────────────── */
     const handleSubmit = async () => {
-        if (!serviceType || allowedService(serviceType, mode) !== serviceType) {
-            setError("Choose an offered service before submitting.");
-            setServiceType(allowedService(null, mode));
-            setStep(Math.max(0, phases.indexOf("service_type")));
-            return;
+        if (sendingRef.current) return;
+        if (!hasAttempts(intent)) {
+            if (!serviceType || allowedService(serviceType, mode) !== serviceType) {
+                setError("Choose an offered service before submitting.");
+                setServiceType(allowedService(null, mode));
+                setStep(Math.max(0, phases.indexOf("service_type")));
+                return;
+            }
+            // Browser Forward can revisit quote after an earlier answer was cleared.
+            // Recheck all required phases before any booking or card request.
+            const incompletePhase = phases.find(phase => phase !== "quote" && !canProceed(phase));
+            if (incompletePhase) {
+                setError(incompletePhase === "schedule"
+                    ? "Please review the date and choose a currently available time before submitting."
+                    : "Please complete the required details before submitting.");
+                setStep(phases.indexOf(incompletePhase));
+                return;
+            }
+            if (!termsAccepted) return;
+            if ((serviceType === "dumpster" || serviceType === "both") && !config.offersDumpsterRental) {
+                setError("Dumpster rental is no longer offered. Please review your service selection.");
+                setStep(0); return;
+            }
+            if ((serviceType === "dumpster" || serviceType === "both") && !validContainerSelection(containerSize, config.dumpsterPricing)) {
+                setError("Choose a currently offered container size before booking.");
+                setStep(phases.indexOf("dumpster_size"));
+                return;
+            }
         }
-        // Browser Forward can revisit quote after an earlier answer was cleared.
-        // Recheck all required phases before any booking or card request.
-        const incompletePhase = phases.find(phase => phase !== "quote" && !canProceed(phase));
-        if (incompletePhase) {
-            setError(incompletePhase === "schedule"
-                ? "Please review the date and choose a currently available time before submitting."
-                : "Please complete the required details before submitting.");
-            setStep(phases.indexOf(incompletePhase));
-            return;
-        }
-        if (!termsAccepted) return;
-        if ((serviceType === "dumpster" || serviceType === "both") && !config.offersDumpsterRental) {
-            setError("Dumpster rental is no longer offered. Please review your service selection.");
-            setStep(0); return;
-        }
-        if ((serviceType === "dumpster" || serviceType === "both") && !validContainerSelection(containerSize, config.dumpsterPricing)) {
-            setError("Choose a currently offered container size before booking.");
-            setStep(phases.indexOf("dumpster_size"));
-            return;
-        }
+        sendingRef.current = true;
         setSubmitting(true);
         setError("");
         try {
-            // Booking-session identity; both legs share fresh acknowledgements
-            // and stop using an ID after the stale-ID response.
-            const lead: { id: string | null } =
-                { id: leadIdRef.current };
-            const timeSlotOption = dynamicSlots?.find(s => `${s.start}-${s.end}` === selectedTime)
-                ?? TIME_SLOTS.find(t => t.id === selectedTime);
-
             // Shared card confirmation (runs once, caches result)
-            let confirmedPaymentMethodId: string | null = null;
+            let confirmedPaymentMethodId: string | null = intent.paymentMethodId ?? null;
             // How saving the card actually went. Every status used to be read as
             // success, so a card that never saved still reported one — and on a
             // 409 the new card is discarded while the old one stays default.
@@ -654,37 +660,13 @@ export default function BookingWizard({
                 );
                 if (stripeErr) throw new Error(stripeErr.message || "Card save failed");
                 confirmedPaymentMethodId = (setupIntent?.payment_method as string) || null;
+                if (confirmedPaymentMethodId) intent.paymentMethodId = confirmedPaymentMethodId;
+                if (!persistIntent()) throw new Error(STORAGE_MESSAGE);
                 return confirmedPaymentMethodId;
             };
 
-            // Only the existing stale-ID 404 is retried automatically. Intake may
-            // record consent before that lookup, but has not created the booking.
-            const postBooking = async (payload: Record<string, unknown>): Promise<BookingResponse> => {
-                const send = async (): Promise<{ data?: BookingResponse; status: number; message: string }> => {
-                    try {
-                        return { data: await widgetApi.submitBooking(payload, apiOpts) as BookingResponse, status: 200, message: "" };
-                    } catch (err) {
-                        // Anything that is not an ApiError is the network or a
-                        // body that would not parse — never text for a customer.
-                        if (err instanceof ApiError) return { status: err.status, message: err.message };
-                        return { status: 0, message: "" };
-                    }
-                };
-                let out = await send();
-                if (isStaleLeadResponse(out.status, payload.leadId !== undefined)) {
-                    lead.id = null;
-                    delete payload.leadId;
-                    rememberLead(null);
-                    out = await send();
-                }
-                if (!out.data) throw new Error(out.message || bookingSubmitErrorMessage(undefined, out.status));
-                if (out.data.rejected) throw new Error(bookingSubmitErrorMessage(out.data.message, 409));
-                if (!acknowledgedRequest(out.data)) throw new Error("We couldn't verify whether your request was received. Please call before submitting again.");
-                return out.data;
-            };
-
-            /* ── JUNK REMOVAL payload ── */
-            const sendJunkBooking = async () => {
+            const sendBooking = (payload: Record<string, unknown>): Promise<BookingEnvelope> => widgetApi.submitBookingResponse(payload, apiOpts);
+            const buildJunkPayload = () => {
                 const loadTier = LOAD_TIERS[tierIndex];
                 const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
                 const volumeOption = VOLUME_OPTIONS.find(v => v.id === volume);
@@ -706,14 +688,6 @@ export default function BookingWizard({
                 const quoteRangeStr = isOnSiteEstimate
                     ? "On-Site Estimate"
                     : (tierData ? `$${minPrice} – $${maxPrice}` : "Quote confirmed on site");
-                // What the customer is shown, which is not what we submit. The
-                // payload keeps the list price on purpose — the dashboard
-                // resolves the promo itself and would otherwise discount an
-                // already-discounted figure — but the confirmation has to
-                // repeat the number the quote step showed, not a higher one.
-                const displayRangeStr = (promoDiscountsJunk && !isOnSiteEstimate && tierData)
-                    ? `$${discountedPriceText(displayJunkTotal(minPrice))} – $${discountedPriceText(displayJunkTotal(maxPrice))}`
-                    : (tierData && !isOnSiteEstimate ? `$${formatPriceAmount(displayJunkTotal(minPrice))} – $${formatPriceAmount(displayJunkTotal(maxPrice))}` : quoteRangeStr);
                 const stairsAccessLabel = locationOption?.label || "Ground Floor";
 
                 const payload: Record<string, unknown> = {
@@ -730,6 +704,7 @@ export default function BookingWizard({
                         ...(addressVerified ? {} : { addressVerified: false }),
                         timeSlot: selectedTime || "",
                         truckLoad: loadSize.truckLoad, quoteRange: quoteRangeStr,
+                        ...(!isOnSiteEstimate && tierData ? { quoteMin: minPrice, quoteMax: maxPrice } : {}),
                         loadTier: loadSize.loadTier,
                         junkLocation: locationOption?.label || "", stairsAccess: stairsAccessLabel,
                         specialConditions: edgeCaseIds,
@@ -752,26 +727,9 @@ export default function BookingWizard({
                     source: bookingSource,
                     ...(promoCode ? { promoCode } : {}),
                 };
-                if (lead.id) payload.leadId = lead.id;
-
-                // Stripe card-on-file
-                const pmId = paymentPreference === "card" ? await confirmCard() : null;
-                if (pmId) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
-
-                const data = await postBooking(payload);
-                if (data.leadId) { lead.id = data.leadId; rememberLead(data.leadId); }
-                if (data.customerId) setStoredCustomerId(data.customerId);
-
-                // Confirm card-on-file with dashboard
-                if (pmId && data.customerId) {
-                    await recordCardConfirmation(data.customerId, pmId);
-                }
-
-                return displayRangeStr;
+                return payload;
             };
-
-            /* ── DUMPSTER RENTAL payload ── */
-            const sendDumpsterLead = async (): Promise<{ autoBooked?: boolean }> => {
+            const buildDumpsterPayload = () => {
                 const containerLabel = containerSizes.find(c => c.id === containerSize)?.label || containerSize || "";
                 const debrisLabel = DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType || "";
                 const durationLabel = RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration || "";
@@ -813,93 +771,51 @@ export default function BookingWizard({
                     source: bookingSource,
                     ...(promoCode ? { promoCode } : {}),
                 };
-                if (lead.id) payload.leadId = lead.id;
-
-                // Stripe card-on-file
-                const pmId = paymentPreference === "card" ? await confirmCard() : null;
-                if (pmId) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
-
-                const data = await postBooking(payload);
-                if (data.leadId) { lead.id = data.leadId; rememberLead(data.leadId); }
-                if (data.customerId) setStoredCustomerId(data.customerId);
-
-                // Confirm card-on-file with dashboard
-                if (pmId && data.customerId) {
-                    await recordCardConfirmation(data.customerId, pmId);
-                } else if (pmId) {
-                    // No customerId means the dashboard could not auto-approve
-                    // this rental, so there is no customer to attach the card
-                    // to and confirm-card is never called. Nothing failed and
-                    // nothing was charged — but the quote step promised the
-                    // base rate on confirmation, so silence is the wrong
-                    // answer. See ../lib/bookingLogic.ts.
-                    card.outcome = mergeCardConfirmations(card.outcome, "not_saved_pending_approval");
-                }
-
-                return { autoBooked: data.autoBooked };
+                return payload;
             };
-
-            /* ── Execute based on service type ── */
-            let priceStr = "";
-            let dumpsterPriceStr = "";
-            let dumpsterAutoBooked = false;
-            let dumpsterError = "";
-            if (serviceType === "junk" || serviceType === "both") {
-                priceStr = await sendJunkBooking();
+            if (!hasAttempts(intent)) {
+                const payloads: Partial<Record<ServiceLeg, Record<string, unknown>>> = {};
+                if (serviceType === "junk" || serviceType === "both") payloads.junk = buildJunkPayload();
+                if (serviceType === "dumpster" || serviceType === "both") payloads.dumpster = buildDumpsterPayload();
+                const pmId = paymentPreference === "card" ? await confirmCard() : null;
+                if (pmId) for (const payload of Object.values(payloads)) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
+                freezeAttempts(intent, payloads, persistIntent);
+                changedIntent();
             }
-            if (serviceType === "dumpster" || serviceType === "both") {
-                try {
-                    const dumpsterResult = await sendDumpsterLead();
-                    dumpsterAutoBooked = !!dumpsterResult.autoBooked;
-                    // Build dumpster price string from pricing tiers
-                    const sizeNum = containerSize ? parseInt(containerSize) : 0;
-                    const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
-                    if (dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0))) {
-                        const sizeLabel = containerSizes.find(c => c.id === containerSize)?.label || "";
-                        // formatDumpsterPrice is the list price; when a promo
-                        // covers this leg the quote step showed less than that.
-                        const dMin = (dTier.baseRateMin ?? dTier.baseRate);
-                        const dMax = dTier.baseRateMax ? dTier.baseRateMax : null;
-                        const dPriceText = !promoDiscountsDumpster
-                            ? formatDumpsterPrice(dTier)
-                            : (dMax && dMax > dMin
-                                ? `$${discountedPriceText(dMin)} – $${discountedPriceText(dMax)}`
-                                : `Starting at $${discountedPriceText(dMin)}`);
-                        dumpsterPriceStr = `${sizeLabel} — ${dPriceText}`;
-                    }
-                } catch (dumpErr) {
-                    if (serviceType === "both") {
-                        // Junk already succeeded — capture error, don't rethrow.
-                        dumpsterError = dumpErr instanceof Error ? dumpErr.message : "Dumpster request failed";
-                    } else {
-                        throw dumpErr; // dumpster-only — rethrow to outer catch
-                    }
+            await resumeIntent(intent, sendBooking, persistIntent, changedIntent);
+            if (intent.leadId) rememberLead(intent.leadId);
+            const outcomes = intentOutcomes(intent);
+            // Card recovery uses the saved method and customer; no new SetupIntent on replay.
+            if (intent.paymentMethodId) {
+                intent.cardResults ||= {};
+                for (const ack of Object.values(outcomes)) if (ack.customerId && resolvedOutcome(ack) && !intent.cardResults[ack.customerId]) {
+                    await recordCardConfirmation(ack.customerId, intent.paymentMethodId);
+                    intent.cardResults[ack.customerId] = card.outcome || "failed";
                 }
+                if (card.outcome && card.outcome !== "saved") intent.cardIssue = card.outcome;
+                else if (!Object.values(outcomes).some(a => a.customerId)) intent.cardIssue = "not_saved_pending_approval";
             }
-            try { sessionStorage.removeItem(storageKey); } catch {}
-            // Instead of Next.js router navigation, call the onComplete callback
-            if (onComplete) {
-                onComplete({
-                    name: contact.name,
-                    date: selectedDate?.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) || "",
-                    time: timeSlotOption?.label || formatSlotTime(selectedTime) || "",
-                    price: priceStr,
-                pricingUnconfirmed: true,
-                promoRequested: promoCode || undefined,
-                    serviceType: serviceType || "junk",
-                    address: serviceAddress || undefined,
-                    dumpsterPrice: dumpsterPriceStr || undefined,
-                    debrisType: debrisType ? (DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType) : undefined,
-                    rentalDuration: rentalDuration ? (RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration) : undefined,
-                    autoBooked: dumpsterAutoBooked || undefined,
-                    dumpsterError: dumpsterError || undefined,
-                    // Omitted when the card saved, so the confirmation stays quiet.
-                    cardIssue: card.outcome && card.outcome !== "saved" ? card.outcome : undefined,
-                });
-            }
+            const fullyResolved = Object.values(intent.attempts).every(a => resolvedOutcome(a.acknowledgement));
+            if (!persistIntent()) throw new Error("Keep this tab open. Your response could not be saved; please call us before booking again.");
+            changedIntent();
+            if (!fullyResolved) return;
+            const receipt = {
+                name: contact.name, date: selectedDate ? calendarDate(selectedDate) : "", time: selectedTime || "",
+                price: outcomes.junk ? acceptedPriceLabel(outcomes.junk) || "" : "",
+                dumpsterPrice: outcomes.dumpster ? acceptedPriceLabel(outcomes.dumpster) || undefined : undefined,
+                pricingUnconfirmed: !Object.values(outcomes).every(a => a.pricing.status === "accepted"),
+                serviceType: Object.keys(intent.attempts).length === 2 ? "both" : Object.keys(intent.attempts)[0] || "junk", address: serviceAddress || undefined,
+                outcomes, promoRequested: promoCode || undefined, cardIssue: intent.cardIssue as CardConfirmation | undefined,
+                debrisType: debrisType ? DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType : undefined,
+                rentalDuration: rentalDuration ? RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration : undefined,
+            };
+            try { sessionStorage.setItem(`${storageKey}:receipt`, JSON.stringify(receipt)); } catch { throw new Error("Keep this tab open to retain your response. Please call us before booking again."); }
+            onComplete?.(receipt);
         } catch (err: unknown) {
             setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
         } finally {
+            sendingRef.current = false;
+            changedIntent();
             setSubmitting(false);
         }
     };
@@ -960,6 +876,17 @@ export default function BookingWizard({
     const phoneValidation = validatePhone(contact.phone);
 
     /* ── Render ──────────────────────────────────────────────────────────── */
+    if (!hydrated) return <div style={{ minHeight: "50vh" }} aria-label="Loading booking" />;
+    if (hasAttempts(intent) || intent.blocked) return <div style={{ maxWidth: 640, margin: "32px auto", padding: 20 }}>
+        <h1 style={{ fontSize: 28, marginBottom: 16 }}>Your booking status</h1>
+        <p style={{ marginBottom: 16 }}>{intent.blocked ? "Your saved booking could not be read safely. Please call us to check it before starting another booking." : "Your original submission is saved. Contact us to change its details. Checking status uses the same request."}</p>
+        <BookingReceipt outcomes={intentOutcomes(intent)} services={Object.keys(intent.attempts) as ServiceLeg[]} requestedDate={selectedDate ? calendarDate(selectedDate) : ""} requestedTime={selectedTime || ""} phone={config.phoneNumber} cardIssue={intent.cardIssue} />
+        {error && <p role="alert" style={{ marginTop: 16 }}>{error}</p>}
+        {canResume(intent) && <button type="button" onClick={handleSubmit} disabled={submitting} className="btn-primary" style={{ minHeight: 44, marginTop: 16 }}>{submitting ? "Checking request…" : "Check saved booking status"}</button>}
+        {!canResume(intent) && !intent.blocked && <button type="button" onClick={handleSubmit} disabled={submitting} style={{ minHeight: 44, marginTop: 16 }}>View saved receipt</button>}
+        <details style={{ marginTop: 24 }}><summary>Start a separate booking</summary><p>This creates an additional booking. It does not change or cancel your saved request.</p><button type="button" onClick={freshBooking} disabled={submitting} style={{ minHeight: 44 }}>Start new booking</button></details>
+    </div>;
+
     return (
         <div style={{ minHeight: "100vh", background: "var(--background)" }}>
             {/* Progress bar */}

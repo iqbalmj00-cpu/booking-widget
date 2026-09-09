@@ -1,3 +1,4 @@
+import type { BookingEnvelope } from "./bookingIntent";
 import { bookingSubmitErrorMessage } from "./bookingLogic";
 /**
  * api.ts — API client for the booking widget.
@@ -20,7 +21,7 @@ export class ApiError extends Error {
     readonly status: number;
     readonly code: string;
 
-    constructor(message: string, status: number, code: string) {
+    constructor(message: string, status: number, code: string, readonly data: unknown = null, readonly retryAfter: string | null = null) {
         super(message);
         this.name = "ApiError";
         this.status = status;
@@ -34,9 +35,9 @@ export function customerApiMessage(status: number, code: string): string {
 
 async function readResponse(res: Response) {
     const data = await res.json().catch(() => null);
-    const code = typeof data?.error === "string" ? data.error : "";
+    const code = typeof data?.code === "string" ? data.code : typeof data?.error === "string" ? data.error : "";
     if (!res.ok || !data || typeof data !== "object") {
-        throw new ApiError(customerApiMessage(res.status, code), res.status, code);
+        throw new ApiError(customerApiMessage(res.status, code), res.status, code, data, res.headers?.get("Retry-After"));
     }
     return data;
 }
@@ -59,6 +60,15 @@ async function apiGet(path: string, params: Record<string, string>, opts: Reques
 }
 
 export const widgetApi = {
+    /** Booking-specific transport keeps 202/conflicts as data for durable reconciliation. */
+    submitBookingResponse: async (payload: Record<string, unknown>, opts: RequestOptions): Promise<BookingEnvelope> => {
+        try {
+            const res = await fetch(`${opts.widgetApiUrl}/api/ingest/website`, {
+                method: "POST", headers: { "Content-Type": "application/json", "x-site-token": opts.siteToken }, body: JSON.stringify(payload),
+            });
+            return { status: res.status, data: await res.json().catch(() => null), retryAfter: res.headers?.get("Retry-After") };
+        } catch { return { status: 0, data: null }; }
+    },
     /** Submit booking or lead data to dashboard CRM */
     submitBooking: (payload: Record<string, unknown>, opts: RequestOptions) =>
         apiPost("/api/ingest/website", payload, opts),
