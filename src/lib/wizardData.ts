@@ -176,8 +176,8 @@ export const DEBRIS_TYPES: DebrisType[] = [
 ];
 
 export const RENTAL_DURATIONS: RentalDuration[] = [
-    { id: "1_week", label: "About a week", desc: "3–7 day rental" },
-    { id: "2_weeks", label: "About 2 weeks", desc: "8–14 day rental" },
+    { id: "1_week", label: "7 days", desc: "Pickup requested 7 days after delivery" },
+    { id: "2_weeks", label: "14 days", desc: "Pickup requested 14 days after delivery" },
     { id: "call_when_full", label: "Not sure — I'll call when it's full", desc: "Flexible timeline" },
 ];
 

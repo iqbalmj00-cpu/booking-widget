@@ -1,3 +1,4 @@
+import { readRentalTerms, rentalDaysForSelection, rentalTermsLines, rentalInclusionLines } from "../lib/rentalPricing";
 import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
 import BookingReceipt from "./BookingReceipt";
 import { getContainerSizes, validContainerSelection } from "../lib/containerCatalog";
@@ -1319,15 +1320,13 @@ export default function BookingWizard({
                                     </div>
                                     {/* Live price from availability API or static fallback */}
                                     {liveRate ? (
-                                        <div style={{ fontWeight: 900, fontSize: 18, color: "var(--foreground)", marginBottom: 4 }}>From ${formatPriceAmount(liveRate)}</div>
+                                        <div style={{ fontWeight: 900, fontSize: 18, color: "var(--foreground)", marginBottom: 4 }}>${formatPriceAmount(liveRate)} base rental</div>
                                     ) : hasPrice ? (
                                         <div style={{ fontWeight: 900, fontSize: 18, color: "var(--foreground)", marginBottom: 4 }}>{formatDumpsterPrice(tier)}</div>
                                     ) : null}
-                                    {liveDays ? (
-                                        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>{liveDays}-day rental included</div>
-                                    ) : hasPrice ? (
-                                        <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>{tier.includedDays}-day rental · {tier.weightAllowanceTons}T included</div>
-                                    ) : null}
+                                    {hasPrice && <div style={{ fontSize: 11, color: "var(--muted)", marginBottom: 6 }}>
+                                        {rentalInclusionLines(readRentalTerms({ ...tier, ...(liveDays ? { includedDays: liveDays } : {}) })).map(line => <div key={line}>{line}</div>)}
+                                    </div>}
                                     <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 8 }}>{cs.desc}</div>
                                     <div style={{ fontSize: 12, color: "var(--foreground)", background: "var(--background)", padding: "6px 10px", borderRadius: 8, lineHeight: 1.4, marginTop: "auto" }}><strong>Good for:</strong> {cs.goodFor}</div>
                                 </button>
@@ -1515,7 +1514,7 @@ export default function BookingWizard({
                                 return (
                                     <div style={{ background: serviceType === "dumpster" ? "var(--hero-bg)" : "#FFFBEB", padding: serviceType === "dumpster" ? "32px 24px" : "16px 24px", textAlign: "center" }}>
                                         <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E" }}>
-                                            {serviceType === "both" ? "Dumpster Rental" : "Dumpster Rental"}
+                                            Base rental price
                                         </div>
                                         {dHasPrice ? (
                                             <>
@@ -1525,7 +1524,7 @@ export default function BookingWizard({
                                                             {containerSizes.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
                                                         </div>
                                                         <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: "#10B981" }}>
-                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText((dTier.baseRateMin ?? dTier.baseRate))}{dTier.baseRateMax && dTier.baseRateMax > (dTier.baseRateMin ?? dTier.baseRate) ? ` – $${discountedPriceText(dTier.baseRateMax)}` : ""}
+                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText((dTier.baseRateMin ?? dTier.baseRate))}
                                                         </div>
                                                     </>
                                                 ) : (
@@ -1534,7 +1533,7 @@ export default function BookingWizard({
                                                     </div>
                                                 )}
                                                 <div style={{ fontSize: 12, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", marginTop: 4 }}>
-                                                    {dTier.includedDays}-day rental · {dTier.weightAllowanceTons} tons included · ${dTier.overageRatePerTon}/ton overage{dTier.extendedDailyRate ? ` · $${dTier.extendedDailyRate}/day extended` : ""}
+                                                    {rentalTermsLines(readRentalTerms({ ...dTier, rentalDays: rentalDaysForSelection(rentalDuration) })).map(line => <div key={line}>{line}</div>)}
                                                 </div>
                                             </>
                                         ) : (
@@ -1701,7 +1700,7 @@ export default function BookingWizard({
                             <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)}
                                 style={{ width: 20, height: 20, accentColor: "var(--brand)", flexShrink: 0, marginTop: 1 }} />
                             <span style={{ fontSize: 14, color: "var(--foreground)", lineHeight: 1.5 }}>
-                                I agree to the{config.termsUrl ? <> <a href={config.termsUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Terms of Service</a></> : " Terms of Service"}{config.privacyUrl ? <> and <a href={config.privacyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Privacy Policy</a></> : " and Privacy Policy"}. I understand that pricing is finalized on-site, schedule changes should be requested as soon as possible, and hazardous materials cannot be hauled.
+                                I agree to the{config.termsUrl ? <> <a href={config.termsUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Terms of Service</a></> : " Terms of Service"}{config.privacyUrl ? <> and <a href={config.privacyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Privacy Policy</a></> : " and Privacy Policy"}. {serviceType === "junk" ? "Junk-removal pricing is finalized on-site." : serviceType === "both" ? "Junk-removal pricing is finalized on-site. Rental pricing follows the listed base price and included terms; extra-day and excess-weight charges may apply." : "Rental pricing follows the listed base price and included terms; extra-day and excess-weight charges may apply."} Schedule changes should be requested as soon as possible, and hazardous materials cannot be hauled.
                             </span>
                         </label>
 

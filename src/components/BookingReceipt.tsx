@@ -1,5 +1,6 @@
 import { acceptedPriceLabel, outcomeMessage, savedScheduleLabel, type BookingOutcome, type ServiceLeg } from "../lib/bookingIntent";
 import { cardConfirmationNotice, type CardConfirmation } from "../lib/bookingLogic";
+import { rentalTermsLines } from "../lib/rentalPricing";
 
 export default function BookingReceipt({ outcomes, services, requestedDate, requestedTime, phone, cardIssue }: {
     outcomes: Partial<Record<ServiceLeg, BookingOutcome>>; services: ServiceLeg[];
@@ -13,8 +14,11 @@ export default function BookingReceipt({ outcomes, services, requestedDate, requ
                 <p>{ack ? outcomeMessage(ack) : "This service has not received an acknowledgement yet."}</p>
                 {schedule && <p style={{ marginTop: 12 }}>{schedule}</p>}
                 {!schedule && !ack?.rental?.deliveryCompleted && ack?.outcome !== "closed" && requestedDate && <p style={{ marginTop: 12 }}>Requested timing: {requestedDate}{requestedTime ? `, ${requestedTime}` : ""}. Timing still needs confirmation.</p>}
-                {price ? <p style={{ marginTop: 12 }}><strong>Accepted quote subtotal: {price}</strong></p> : <p style={{ marginTop: 12 }}>Accepted price has not been confirmed.</p>}
-                {ack?.pricing.promo.status === "applied" && <p>Promo applied{ack.pricing.discount != null ? `: $${ack.pricing.discount.toFixed(2)} off the lower quote` : ""}.</p>}
+                {price ? <p style={{ marginTop: 12 }}><strong>{service === "dumpster" ? "Accepted rental price" : "Accepted quote subtotal"}: {price}</strong></p> : <p style={{ marginTop: 12 }}>Accepted price has not been confirmed.</p>}
+                {service === "dumpster" && ack?.rental && <div aria-label="Saved rental terms" style={{ marginTop: 12 }}>
+                    {rentalTermsLines(ack.rental).map(line => <p key={line}>{line}</p>)}
+                </div>}
+                {ack?.pricing.promo.status === "applied" && <p>Promo applied{ack.pricing.discount != null ? `: $${ack.pricing.discount.toFixed(2)} off the ${service === "dumpster" ? "base rental" : "lower quote"}` : ""}.</p>}
                 {ack?.pricing.promo.status === "unavailable" && <p>The promo was unavailable. The saved subtotal uses regular pricing.</p>}
                 {ack?.pricing.promo.status === "pending" && <p>Promo eligibility is awaiting approval.</p>}
                 {ack?.pricing.fees.map((fee, i) => <p key={i}>{fee.kind === "same_day" ? "Same-day fee included" : "Fee included"}: ${fee.amount.toFixed(2)}</p>)}

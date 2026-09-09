@@ -88,7 +88,7 @@ async function main(mainOptions = {}) {
 
     const configModule=basic.load(path.join(source,widget?'lib/config.tsx':'lib/siteConfig.ts'));
     const tier={sizeCuYd:15,baseRate:372,baseRateMin:null,baseRateMax:null,includedDays:7,weightAllowanceTons:2,overageRatePerTon:50,extendedDailyRate:10};
-    assert.equal(configModule.formatDumpsterPrice(tier),'Starting at $372');
+    assert.equal(configModule.formatDumpsterPrice(tier),'$372');
     const logic=basic.load(path.join(source,'lib/bookingLogic.ts'));
     assert.equal(logic.applyPromoDiscount(372,'percentage',20),297.6);
     assert.ok(logic.deriveDumpsterNote({serviceType:'both',autoBooked:false,dumpsterError:'lost response'}).includes('Please call'));
@@ -240,4 +240,4 @@ async function main(mainOptions = {}) {
     console.log(`${widget?'Widget':'Website'} booking regressions passed (isolated source + mocked effects/requests; no provider runtime).`);
 }
 module.exports = main;
-if (require.main === module) main().then(() => require("./booking-recovery.cjs")()).catch(error=>{console.error(error);process.exitCode=1;});
+if (require.main === module) main().then(() => require("./booking-recovery.cjs")()).then(() => require("./rental-pricing.cjs")()).catch(error=>{console.error(error);process.exitCode=1;});
