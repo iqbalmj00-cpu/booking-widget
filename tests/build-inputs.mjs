@@ -22,6 +22,21 @@ try {
     const run = () => execFileSync(process.execPath, [join(root, "scripts/build.mjs")], { cwd: root, env, stdio: "pipe", timeout: 180000, maxBuffer: 8 * 1024 * 1024 });
     const bytes = dir => new Map(RELEASE_FILES.map(file => [file, readFileSync(join(dir, file))]));
     const equal = (a, b) => { for (const file of RELEASE_FILES) assert.deepEqual(a.get(file), b.get(file), file); };
+    // This partial checkout has its own honest dirty-state metadata. Establish its
+    // baseline before adding ambient config instead of comparing its build ID to
+    // an upstream candidate that may have been built from a clean CI checkout.
+    run();
+    const baseline = bytes(join(root, "dist"));
+    const baselineManifest = verifyLocal(join(root, "dist"), root);
+    assert.deepEqual(baselineManifest.source.files, candidate.source.files);
+    assert.equal(baselineManifest.source.sha256, candidate.source.sha256);
+    assert.equal(baselineManifest.source.lockSha256, candidate.source.lockSha256);
+    assert.equal(baselineManifest.source.commit, candidate.source.commit);
+    assert.equal(baselineManifest.source.inputsMatchCommit, candidate.source.inputsMatchCommit);
+    assert.deepEqual(baselineManifest.toolchain, candidate.toolchain);
+    assert.deepEqual(baseline.get("embed.css"), readFileSync(join(LOCAL_DIST, "embed.css")));
+    assert.equal(baseline.get("embed.iife.js").toString("utf8"),
+        readFileSync(join(LOCAL_DIST, "embed.iife.js"), "utf8").replaceAll(candidate.buildId, baselineManifest.buildId));
     // Exact review reproduction plus competing Vite/PostCSS config, ancestor config,
     // shrinkwrap precedence and project/user/global npm configuration poisoning.
     const postcss = "module.exports={plugins:[{postcssPlugin:'review-reproduction',Declaration(d){if(d.prop==='color')d.value='#010203';}}]};\n";
@@ -30,12 +45,12 @@ try {
     for (const ext of ["js", "mjs", "cjs", "mts", "cts"]) write(join(root, `vite.config.${ext}`), "throw new Error('alternative Vite config loaded');");
     for (const name of [".postcssrc", ".postcssrc.json", ".postcssrc.yaml", ".postcssrc.yml", ".postcssrc.ts", ".postcssrc.cts", ".postcssrc.mts", ".postcssrc.js", ".postcssrc.cjs", ".postcssrc.mjs", "postcss.config.ts", "postcss.config.cts", "postcss.config.mts", "postcss.config.js", "postcss.config.mjs"]) write(join(root, name), "invalid external config must not be read");
     write(join(root, "npm-shrinkwrap.json"), '{"lockfileVersion":3,"packages":{}}');
-    run(); equal(bytes(join(root, "dist")), bytes(LOCAL_DIST));
+    run(); equal(bytes(join(root, "dist")), baseline);
     console.log("PASS actual PostCSS reproduction, all alternative config paths, ancestor discovery, shrinkwrap and poisoned npm settings excluded; all release bytes identical");
     for (const path of [env.NPM_CONFIG_USERCONFIG, env.NPM_CONFIG_GLOBALCONFIG]) assert.equal(readFileSync(path, "utf8"), "registry=http://127.0.0.1:9/\nomit=dev\n");
 
     const packagePath = join(root, "package.json"); const pkg = JSON.parse(readFileSync(packagePath)); pkg.postcss = { plugins: { "missing-fixture-plugin": {} } }; write(packagePath, JSON.stringify(pkg, null, 4) + "\n");
-    run(); const packageManifest = JSON.parse(readFileSync(join(root, "dist/widget-build-manifest.json"))); assert.notEqual(packageManifest.buildId, candidate.buildId); assert.equal(packageManifest.artifacts["embed.css"].sha256, candidate.artifacts["embed.css"].sha256);
+    run(); const packageManifest = JSON.parse(readFileSync(join(root, "dist/widget-build-manifest.json"))); assert.notEqual(packageManifest.buildId, baselineManifest.buildId); assert.notEqual(packageManifest.source.sha256, baselineManifest.source.sha256); assert.equal(packageManifest.artifacts["embed.css"].sha256, candidate.artifacts["embed.css"].sha256);
     write(packagePath, original.get("package.json")); console.log("PASS package PostCSS field is fingerprinted but discovery remains disabled");
 
     const outsideJs = join(base, "outside.mjs"), outsideTs = join(base, "outside.ts"), outsideCss = join(base, "outside.css"), outsideConfig = join(base, "outside-tsconfig.json");
