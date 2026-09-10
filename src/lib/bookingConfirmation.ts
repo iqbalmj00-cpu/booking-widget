@@ -75,3 +75,4 @@ export function parseBookingConfirmation(raw: string | null | undefined): Bookin
         cardIssue: str(o.cardIssue),
     };
 }
+

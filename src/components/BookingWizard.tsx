@@ -931,7 +931,7 @@ export default function BookingWizard({
                         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
                             <div>
                                 <label className="label" htmlFor={`${fieldId}-name`}>Full Name *</label>
-                                <input className="input" placeholder="John Smith" value={contact.name} onChange={e => setContact(c => ({ ...c, name: e.target.value }))} />
+                                <input id={`${fieldId}-name`} className="input" placeholder="John Smith" value={contact.name} onChange={e => setContact(c => ({ ...c, name: e.target.value }))} />
                             </div>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", gap: 12 }}>
                                 <div>

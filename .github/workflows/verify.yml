@@ -1,0 +1,29 @@
+name: Verify frontend
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm install --global npm@11.19.0 --ignore-scripts --no-fund
+      - run: npm ci --ignore-scripts --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:booking
+      - run: npm run test:rental
+      - run: npm run test:provenance
+      - run: npm run build
+      - run: npm run check:build
+      - run: npm run test:build-failure
+      - run: npm run test:publisher
+      - run: npm run test:build-inputs

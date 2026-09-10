@@ -6,11 +6,8 @@
  * the first failure, matching the dashboard's idiom (scaleyourjunk's
  * src/lib/__tests__ run one file per process with tsx).
  *
- * This repo has no tsx. Adding one would mean `npm install`, and this repo's
- * lockfile is already out of sync with node_modules — a plain install already
- * pulls in dozens of unrelated packages. So we transpile with the compiler the
- * repo already depends on and run the emitted JavaScript. That adds no
- * dependency at all and works on Node 20 as well as 22.
+ * Tests compile with the locked TypeScript compiler and run on the Node version
+ * declared in .nvmrc. All booking/provider tests use isolated fixtures.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -52,8 +49,8 @@ mkdirSync(outDir, { recursive: true });
 // Passing files on the command line makes tsc ignore tsconfig.json, so the
 // emit settings here are the whole configuration. Emitted files are CommonJS;
 // the marker package.json stops Node reading the repo's own "type" field.
-const tsc = path.join(repoRoot, "node_modules", ".bin", "tsc");
-execFileSync(tsc, [
+const tsc = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
+execFileSync(process.execPath, [tsc,
     "--outDir", outDir,
     "--module", "commonjs",
     "--moduleResolution", "node",

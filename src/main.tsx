@@ -17,7 +17,7 @@ import WidgetErrorBoundary from "./components/WidgetErrorBoundary";
 import { normalizeBusinessHours, type WidgetConfig } from "./lib/config";
 import "./styles/widget.css";
 
-/** Build timestamp injected by vite.config.ts `define`. */
+/** Deterministic controlled-build identity injected by vite.config.ts. */
 declare const __WIDGET_BUILD__: string;
 
 function currentScriptOrigin(): string {

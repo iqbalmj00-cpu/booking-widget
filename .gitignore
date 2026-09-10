@@ -5,3 +5,6 @@ dist/
 
 # Test runner output
 .test-out/
+
+# Temporary controlled-build output
+.widget-build-*/
