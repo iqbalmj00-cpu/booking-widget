@@ -51,3 +51,19 @@ export type IntakeAcknowledgement = { success?: boolean; rejected?: boolean; lea
 export function acknowledgedRequest(data: IntakeAcknowledgement | null | undefined): boolean {
     return !!data && data.success === true && data.rejected !== true && typeof data.leadId === "string" && data.leadId.length > 0;
 }
+
+/** Coverage is advisory; distance pricing still follows the configured tiers. */
+export function addressCoverageNotice(confirmed: boolean, verified: boolean, miles: number | null,
+    radius: number | null | undefined, zip: string | null, zips: readonly string[]): string | null {
+    if (!confirmed || !verified) return null;
+    if (miles != null && radius != null && radius > 0 && miles > radius)
+        return "This address is outside our listed service radius. You can continue; service coverage needs review.";
+    if (zip && zips.length > 0 && !zips.includes(zip))
+        return "This ZIP is outside our listed area. You can continue; service coverage needs review.";
+    return null;
+}
+
+export function distanceTierSurcharge(miles: number, tiers: readonly { maxMiles: number; additionalCost: number }[]): number {
+    const sorted = [...tiers].sort((a, b) => a.maxMiles - b.maxMiles);
+    return (sorted.find(t => miles <= t.maxMiles) ?? sorted[sorted.length - 1])?.additionalCost ?? 0;
+}

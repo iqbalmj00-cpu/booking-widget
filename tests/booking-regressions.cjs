@@ -121,7 +121,7 @@ async function main(mainOptions = {}) {
             if(url.includes('container-availability'))return options.availability?options.availability():{ok:true,status:200,json:async()=>({available:true})};
             if(url.includes('crm')||url.includes('ingest/website'))return options.submit?options.submit(init):{ok:true,status:200,json:async()=>({success:true,leadId:saved.leadId||'fresh-fixture',autoBooked:true})};
             if(url.includes('confirm-card'))return options.confirmCard ? options.confirmCard(init) : {ok:true,status:200,json:async()=>({success:true})};
-            if(url.includes('promo'))return {ok:true,status:200,json:async()=>({valid:true,appliesTo:'both',discountType:'percentage',discountValue:20})};
+            if(url.includes('promo'))return {ok:true,status:200,json:async()=>options.promo ?? ({valid:true,appliesTo:'both',discountType:'percentage',discountValue:20})};
             throw new Error(`Unmocked fixture request ${url}`);
         };
         const lm=loader({react:h.api,'next/navigation':route,[path.join(source,widget?'lib/config.tsx':'lib/siteConfig.ts')]:{...configModule,siteConfig:effectiveConfig,hasConfiguredPricing:()=>effectiveConfig.pricingConfigured,useConfig:()=>effectiveConfig},[path.join(source,widget?'components/VolumeEstimator.tsx':'components/booking/VolumeEstimator.tsx')]:{VolumeEstimator:()=>null},'@stripe/stripe-js':{loadStripe:deny},...(options.card ? {[path.join(source,'lib/booking/useBookingCard.ts')]:{useBookingCard:(key,active)=>{options.card.active?.(active);return options.card;}}} : {})}, {window:{history,location:{reload:()=>calls.push({reload:true})},gtag:(command,event,params)=>calls.push({event,params}),addEventListener:(e,fn)=>events[e]=fn,removeEventListener:()=>{}},sessionStorage:storage,localStorage:{getItem:()=>{throw new Error('Origin-wide lead read');},setItem:()=>{throw new Error('Origin-wide lead write');}},fetch:respond,...(options.fastTimers ? {setTimeout:fn=>{Promise.resolve().then(fn);return 0;},clearTimeout:()=>{}} : {})});
@@ -240,4 +240,4 @@ async function main(mainOptions = {}) {
     console.log(`${widget?'Widget':'Website'} booking regressions passed (isolated source + mocked effects/requests; no provider runtime).`);
 }
 module.exports = main;
-if (require.main === module) main().then(() => require("./booking-recovery.cjs")()).then(() => require("./rental-pricing.cjs")()).catch(error=>{console.error(error);process.exitCode=1;});
+if (require.main === module) main().then(() => require("./booking-recovery.cjs")()).then(() => require("./rental-pricing.cjs")()).then(() => require("./remaining-booking-issues.cjs")()).catch(error=>{console.error(error);process.exitCode=1;});

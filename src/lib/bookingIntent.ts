@@ -86,7 +86,12 @@ export function readWizardDraft(raw: string | null) {
             if (typeof draft.contact !== "object" || Array.isArray(draft.contact)) return { recoveryBlocked: true };
             for (const value of Object.values(draft.contact)) if (typeof value !== "string") return { recoveryBlocked: true };
         }
-        for (const key of ["step", "tierIndex", "distanceSurcharge", "distanceMiles"]) if (draft[key] != null && (typeof draft[key] !== "number" || !Number.isFinite(draft[key]) || draft[key] < 0)) return { recoveryBlocked: true };
+        for (const key of ["step", "distanceSurcharge", "distanceMiles"]) if (draft[key] != null && (typeof draft[key] !== "number" || !Number.isFinite(draft[key]) || draft[key] < 0)) return { recoveryBlocked: true };
+        // The estimator exposes five selections (0–4); the sixth data entry is not selectable.
+        // Keep the existing identity/attempts for review, but use a safe render index.
+        if (draft.tierIndex != null && (!Number.isInteger(draft.tierIndex) || draft.tierIndex < 0 || draft.tierIndex > 4)) {
+            return { ...draft, tierIndex: 1, recoveryBlocked: true };
+        }
         return draft;
     } catch { return { recoveryBlocked: true }; }
 }
@@ -94,7 +99,7 @@ export function readWizardDraft(raw: string | null) {
 export function restoreIntent(saved: unknown): BookingIntent {
     const draft = obj(saved), data = obj(draft.intent);
     const leadId = str(data.leadId) ?? str(draft.leadId);
-    const blocked = draft.recoveryBlocked === true || (draft.intent != null && (data.version !== 1 || (!uuid(data.bookingSessionId) && data.legacy !== true)));
+    const blocked = draft.recoveryBlocked === true || data.blocked === true || (draft.intent != null && (data.version !== 1 || (!uuid(data.bookingSessionId) && data.legacy !== true)));
     const session = uuid(data.bookingSessionId) ? data.bookingSessionId : undefined;
     const intent: BookingIntent = { version: 1, bookingSessionId: session, leadId, legacy: !session && (data.legacy === true || !!leadId), blocked, attempts: {} };
     if (!session && !intent.legacy && !blocked) intent.bookingSessionId = crypto.randomUUID();

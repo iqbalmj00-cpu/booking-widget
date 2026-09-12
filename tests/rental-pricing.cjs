@@ -43,7 +43,7 @@ async function main() {
     const extended=wizardFixture({...defaultSaved,step:6,rentalDuration:'2_weeks',promoCode:'FIXTURE'},{config:{dumpsterPricing:{tiers:[{...tier,baseRateMin:340,baseRateMax:490}],surcharges:[]}}});
     await extended.h.flush();
     const extendedQuote=text(extended.h.tree);
-    for(const phrase of ['$340','$272','Rental period: 14 days','Estimated later extra-day charge for 14 days: $70.00','Not included in the base rental price']) assert.ok(extendedQuote.includes(phrase),phrase);
+    for(const phrase of ['$340','$292','Rental period: 14 days','Estimated later extra-day charge for 14 days: $70.00','Not included in the base rental price']) assert.ok(extendedQuote.includes(phrase),phrase);
     assert.ok(!extendedQuote.includes('$490'));assert.ok(!extendedQuote.includes('$392'));
     button(extended.h.tree,'Confirm & Book').props.onClick();await extended.h.flush();
     assert.equal(extended.calls.find(c=>c.body?.serviceType==='dumpster_rental').body.value,340);

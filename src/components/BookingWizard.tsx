@@ -1,4 +1,4 @@
-import { readRentalTerms, rentalDaysForSelection, rentalTermsLines, rentalInclusionLines } from "../lib/rentalPricing";
+import { readRentalTerms, rentalDaysForSelection, rentalTermsLines, rentalQuoteBase, rentalQuoteSubtotal, rentalMoney, rentalInclusionLines } from "../lib/rentalPricing";
 import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
 import BookingReceipt from "./BookingReceipt";
 import { getContainerSizes, validContainerSelection } from "../lib/containerCatalog";
@@ -28,7 +28,7 @@ import {
     type ServiceType, type WizardPhase, type DynamicSlot,
 } from "../lib/wizardData";
 import { useBookingCard } from "../lib/booking/useBookingCard";
-import { calendarDate, restoreCalendarDate, companyMode, allowedService, reconcileStep, validSlotSelection, addSameDayFee } from "../lib/bookingFlow";
+import { addressCoverageNotice, distanceTierSurcharge, calendarDate, restoreCalendarDate, companyMode, allowedService, reconcileStep, validSlotSelection, addSameDayFee } from "../lib/bookingFlow";
 
 export type BookingCompleteData = {
     name: string; date: string; time: string; price: string;
@@ -224,15 +224,16 @@ export default function BookingWizard({
         name: "", phone: "", email: "", address: "", addressUnit: "", notes: "", customerType: "residential",
         ...(saved?.contact ?? {}),
     });
-    const [addressInArea, setAddressInArea] = useState(true);
     const [addressConfirmed, setAddressConfirmed] = useState(saved?.addressConfirmed ?? false);
     /** True only when the address came from a Google suggestion. Manual entry
      *  (Places unavailable or unconfigured) yields no ZIP and no coordinates,
      *  so the service-area checks cannot run and the operator needs to know. */
     const [addressVerified, setAddressVerified] = useState<boolean>(saved?.addressVerified ?? true);
-    const [outOfAreaMsg, setOutOfAreaMsg] = useState<string | null>(null);
-    const [distanceSurcharge, setDistanceSurcharge] = useState(saved?.distanceSurcharge ?? 0);
+    const [addressZip, setAddressZip] = useState<string | null>(typeof saved?.addressZip === "string" ? saved.addressZip : null);
     const [distanceMiles, setDistanceMiles] = useState<number | null>(saved?.distanceMiles ?? null);
+    const outOfAreaMsg = addressCoverageNotice(addressConfirmed, addressVerified, distanceMiles, config.serviceAreaRadiusMiles, addressZip, config.serviceAreaZips);
+    const distanceSurcharge = !addressConfirmed || !addressVerified ? 0 : distanceMiles != null
+        ? distanceTierSurcharge(distanceMiles, config.pricing.distanceTiers || []) : saved?.distanceSurcharge ?? 0;
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
     const [leadCaptured, setLeadCaptured] = useState(!!leadIdRef.current && !!saved?.leadCaptured);
@@ -303,14 +304,14 @@ export default function BookingWizard({
             step, tierIndex, edgeCases, volume, location,
             selectedDate: selectedDate ? calendarDate(selectedDate) : null,
             leadId: intent.leadId, intent,
-            selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
+            selectedTime, contact, distanceSurcharge, distanceMiles, addressZip, leadCaptured,
             termsAccepted, serviceType, containerSize, debrisType,
             rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
             addressConfirmed, addressVerified,
         };
         try { sessionStorage.setItem(storageKey, JSON.stringify(data)); } catch {}
     }, [step, tierIndex, edgeCases, volume, location,
-        selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, leadCaptured,
+        selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, addressZip, leadCaptured,
         termsAccepted, serviceType, containerSize, debrisType,
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
         addressConfirmed, addressVerified, intent, storageKey]);
@@ -507,7 +508,7 @@ export default function BookingWizard({
         rental: serviceType === "dumpster" || serviceType === "both",
         availability: availabilityState, availabilityCurrent: checkedAvailabilityKey === availabilityKey,
     });
-    const displayJunkTotal = (base: number) => slotSameDay && selectedDate && slotsDate === calendarDate(selectedDate)
+    const displaySameDayTotal = (base: number) => slotSameDay && selectedDate && slotsDate === calendarDate(selectedDate)
         ? (slotSameDay.isSameDay ? addSameDayFee(base, slotSameDay) : base)
         : base;
 
@@ -517,7 +518,7 @@ export default function BookingWizard({
         switch (phase) {
             case "contact": {
                 const hasRequired = !!(contact.name && contact.email && contact.address);
-                const areaOk = addressConfirmed && addressInArea && !outOfAreaMsg;
+                const areaOk = addressConfirmed;
                 const emailOk = emailValidation.valid;
                 return hasRequired && areaOk && emailOk && phoneValidation.valid;
             }
@@ -976,61 +977,22 @@ export default function BookingWizard({
                                     onChange={(val) => {
                                         setContact(c => ({ ...c, address: val }));
                                         setAddressConfirmed(false);
-                                        setAddressInArea(true);
-                                        setOutOfAreaMsg(null);
                                     }}
                                     onPlaceSelect={(place) => {
                                         setContact(c => ({ ...c, address: place.address }));
                                         setAddressConfirmed(true);
                                         setAddressVerified(place.verified);
-                                        // Typed manually — no ZIP and no coordinates, so neither
-                                        // area check below can run. The booking is accepted and
-                                        // metadata.addressVerified tells the operator to confirm
-                                        // the address themselves. Stated explicitly rather than
-                                        // letting both checks silently pass.
-                                        if (!place.verified) {
-                                            setDistanceMiles(null);
-                                            setDistanceSurcharge(0);
-                                            setAddressInArea(true);
-                                            setOutOfAreaMsg(null);
-                                            return;
-                                        }
-                                        // ZIP-based area check (existing)
-                                        const zips = config.serviceAreaZips;
-                                        let zipOk = true;
-                                        if (zips.length > 0 && place.zip) {
-                                            zipOk = zips.includes(place.zip);
-                                        }
-                                        // Distance-based area check + surcharge (new)
-                                        let radiusOk = true;
-                                        let newDistanceSurcharge = 0;
-                                        if (config.serviceAreaCenter && place.lat && place.lng) {
-                                            const dist = haversineDistance(place.lat, place.lng, config.serviceAreaCenter.lat, config.serviceAreaCenter.lng);
-                                            setDistanceMiles(Math.round(dist * 10) / 10);
-                                            if (config.serviceAreaRadiusMiles && dist > config.serviceAreaRadiusMiles) {
-                                                radiusOk = false;
-                                            } else {
-                                                // Find matching distance tier
-                                                const dTiers = pricing.distanceTiers || [];
-                                                const sorted = [...dTiers].sort((a, b) => a.maxMiles - b.maxMiles);
-                                                const matchedTier = sorted.find(t => dist <= t.maxMiles);
-                                                newDistanceSurcharge = matchedTier ? matchedTier.additionalCost : (sorted.length > 0 ? sorted[sorted.length - 1].additionalCost : 0);
-                                            }
-                                        } else {
-                                            setDistanceMiles(null);
-                                        }
-                                        setDistanceSurcharge(newDistanceSurcharge);
-                                        if (!zipOk || !radiusOk) {
-                                            setAddressInArea(false);
-                                            setOutOfAreaMsg("We do not service your area. Sorry for the inconvenience.");
-                                        } else {
-                                            setAddressInArea(true);
-                                            setOutOfAreaMsg(null);
-                                        }
+                                        setAddressZip(place.verified ? place.zip || null : null);
+                                        // Keep exact distance so selection and reload use identical tier/radius boundaries.
+                                        // Manual addresses carry no location evidence and no distance charge.
+                                        const centerLat = config.serviceAreaCenter?.lat;
+                                        const centerLng = config.serviceAreaCenter?.lng;
+                                        setDistanceMiles(place.verified && place.lat != null && place.lng != null && centerLat != null && centerLng != null
+                                            ? haversineDistance(place.lat, place.lng, centerLat, centerLng) : null);
                                     }}
                                 />
                                 {outOfAreaMsg && (
-                                    <div style={{ marginTop: 8, padding: "10px 14px", borderRadius: 10, background: "#FEF2F2", border: "1px solid #FECACA", fontSize: 13, color: "#DC2626", display: "flex", alignItems: "flex-start", gap: 8 }}>
+                                    <div style={{ marginTop: 8, padding: "10px 14px", borderRadius: 10, background: "#FFFBEB", border: "1px solid #FDE68A", fontSize: 13, color: "#92400E", display: "flex", alignItems: "flex-start", gap: 8 }}>
                                         <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
                                         <span>{outOfAreaMsg}</span>
                                     </div>
@@ -1271,7 +1233,7 @@ export default function BookingWizard({
                                         <span style={{ fontSize: 13, color: "var(--muted)", fontWeight: 500 }}>Estimated Range</span>
                                         {tierData && (
                                             <span style={{ fontFamily: "var(--heading-font)", fontSize: 26, fontWeight: 800, color: "var(--foreground)", letterSpacing: -0.5 }}>
-                                                ${displayJunkTotal(roundTo5(tierData.min + totalAdj))} – ${displayJunkTotal(roundTo5(tierData.max + totalAdj))}
+                                                ${displaySameDayTotal(roundTo5(tierData.min + totalAdj))} – ${displaySameDayTotal(roundTo5(tierData.max + totalAdj))}
                                             </span>
                                         )}
                                         <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 500 }}>Finalized on-site</span>
@@ -1480,16 +1442,16 @@ export default function BookingWizard({
                                     ) : promoDiscountsJunk && tierData ? (
                                         <>
                                             <div style={{ fontSize: 18, color: "var(--hero-muted, #94A3B8)", textDecoration: "line-through", position: "relative", zIndex: 1 }}>
-                                                ${displayJunkTotal(roundTo5(tierData.min + totalAdj))} – ${displayJunkTotal(roundTo5(tierData.max + totalAdj))}
+                                                ${displaySameDayTotal(roundTo5(tierData.min + totalAdj))} – ${displaySameDayTotal(roundTo5(tierData.max + totalAdj))}
                                             </div>
                                             <div style={{ fontFamily: "var(--heading-font)", fontSize: 44, fontWeight: 800, color: "#10B981", letterSpacing: "-0.03em", position: "relative", zIndex: 1 }}>
-                                                ${discountedPriceText(displayJunkTotal(roundTo5(tierData.min + totalAdj)))} – ${discountedPriceText(displayJunkTotal(roundTo5(tierData.max + totalAdj)))}
+                                                ${discountedPriceText(displaySameDayTotal(roundTo5(tierData.min + totalAdj)))} – ${discountedPriceText(displaySameDayTotal(roundTo5(tierData.max + totalAdj)))}
                                             </div>
                                         </>
                                     ) : (
                                         <div style={{ fontFamily: "var(--heading-font)", fontSize: tierData ? 44 : 28, fontWeight: 800, color: "var(--hero-text)", letterSpacing: "-0.03em", position: "relative", zIndex: 1 }}>
                                             {tierData
-                                                ? `$${displayJunkTotal(roundTo5(tierData.min + totalAdj))} – $${displayJunkTotal(roundTo5(tierData.max + totalAdj))}`
+                                                ? `$${displaySameDayTotal(roundTo5(tierData.min + totalAdj))} – $${displaySameDayTotal(roundTo5(tierData.max + totalAdj))}`
                                                 : "Quote confirmed on site"}
                                         </div>
                                     )}
@@ -1503,36 +1465,47 @@ export default function BookingWizard({
                                     </div>}
                                 </div>
                             )}
-                            {(serviceType === "junk" || serviceType === "both") && tierData && !isOnSiteEstimate && displayJunkTotal(roundTo5(tierData.min + totalAdj)) > roundTo5(tierData.min + totalAdj) && <p style={{ padding: "12px 20px" }}>This estimate includes the same-day fee before any promo discount.</p>}
+                            {(serviceType === "junk" || serviceType === "both") && tierData && !isOnSiteEstimate && displaySameDayTotal(roundTo5(tierData.min + totalAdj)) > roundTo5(tierData.min + totalAdj) && <p style={{ padding: "12px 20px" }}>This estimate includes the same-day fee before any promo discount.</p>}
                             {(serviceType === "junk" || serviceType === "both") && !isOnSiteEstimate && !slotSameDay && (config.sameDay?.surchargeAmount ?? 0) > 0 && <p style={{ padding: "12px 20px" }}>A same-day fee may apply. We could not confirm same-day pricing; call us to confirm the total.</p>}
                                 {promoCode && <p style={{ fontSize: 14, marginBottom: 16 }}>Promo eligibility is checked again when you submit. If the code is no longer available, the request continues at the regular price.</p>}
                             {/* Dumpster pending banner */}
                             {(serviceType === "dumpster" || serviceType === "both") && (() => {
                                 const sizeNum = containerSize ? parseInt(containerSize) : 0;
                                 const dTier = config.dumpsterPricing?.tiers.find(t => t.sizeCuYd === sizeNum);
-                                const dHasPrice = dTier && (dTier.baseRate > 0 || (dTier.baseRateMin != null && dTier.baseRateMin > 0));
+                                const dBase = rentalQuoteBase(dTier, checkedAvailabilityKey === availabilityKey && availabilityState === "available" ? containerAvailability : null);
+                                const dBefore = dBase == null ? null : displaySameDayTotal(dBase);
+                                const dSubtotal = dBefore == null ? null : rentalQuoteSubtotal(dBefore, promoDiscountsDumpster ? promoResult : null);
+                                // Widget config has no company timezone. Without a current slot verdict,
+                                // disclose the configured fee as a possible amount instead of assuming zero.
+                                const dFeeUnconfirmed = !(slotSameDay && selectedDate && slotsDate === calendarDate(selectedDate));
+                                const dPossibleBefore = dBase != null && dFeeUnconfirmed ? addSameDayFee(dBase, config.sameDay ?? {}) : dBefore;
+                                const dPossibleSubtotal = dPossibleBefore == null ? null : rentalQuoteSubtotal(dPossibleBefore, promoDiscountsDumpster ? promoResult : null);
                                 return (
                                     <div style={{ background: serviceType === "dumpster" ? "var(--hero-bg)" : "#FFFBEB", padding: serviceType === "dumpster" ? "32px 24px" : "16px 24px", textAlign: "center" }}>
                                         <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E" }}>
-                                            Base rental price
+                                            Estimated rental subtotal (before tax)
                                         </div>
-                                        {dHasPrice ? (
+                                        {dBase != null && dBefore != null && dSubtotal != null ? (
                                             <>
                                                 {promoDiscountsDumpster ? (
                                                     <>
                                                         <div style={{ fontSize: serviceType === "dumpster" ? 18 : 16, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", textDecoration: "line-through" }}>
-                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — {rentalMoney(dBefore)}{dPossibleBefore != null && dPossibleBefore > dBefore ? ` – ${rentalMoney(dPossibleBefore)}` : ""}
                                                         </div>
                                                         <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: "#10B981" }}>
-                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — ${discountedPriceText((dTier.baseRateMin ?? dTier.baseRate))}
+                                                            {containerSizes.find(c => c.id === containerSize)?.label || ""} — {rentalMoney(dSubtotal)}{dPossibleSubtotal != null && dPossibleSubtotal > dSubtotal ? ` – ${rentalMoney(dPossibleSubtotal)}` : ""}
                                                         </div>
                                                     </>
                                                 ) : (
                                                     <div style={{ fontFamily: "var(--heading-font)", fontSize: serviceType === "dumpster" ? 44 : 28, fontWeight: 800, color: serviceType === "dumpster" ? "var(--hero-text)" : "#92400E" }}>
-                                                        {containerSizes.find(c => c.id === containerSize)?.label || ""} — {formatDumpsterPrice(dTier)}
+                                                        {containerSizes.find(c => c.id === containerSize)?.label || ""} — {rentalMoney(dBefore)}{dPossibleBefore != null && dPossibleBefore > dBefore ? ` – ${rentalMoney(dPossibleBefore)}` : ""}
                                                     </div>
                                                 )}
                                                 <div style={{ fontSize: 12, color: serviceType === "dumpster" ? "var(--hero-muted, #94A3B8)" : "#92400E", marginTop: 4 }}>
+                                                    <div>Base rental price: {rentalMoney(dBase)}</div>
+                                                    {dBefore > dBase && <div>Same-day fee: {rentalMoney(Math.round((dBefore - dBase) * 100) / 100)} (before promo discount)</div>}
+                                                    {dPossibleBefore != null && dPossibleBefore > dBefore && <div>A same-day fee of {rentalMoney(Math.round((dPossibleBefore - dBase) * 100) / 100)} may apply before the promo discount. Date eligibility needs confirmation; the range includes this possible fee.</div>}
+                                                    {dSubtotal < dBefore && <div>Promo discount: −{rentalMoney(Math.round((dBefore - dSubtotal) * 100) / 100)}</div>}
                                                     {rentalTermsLines(readRentalTerms({ ...dTier, rentalDays: rentalDaysForSelection(rentalDuration) })).map(line => <div key={line}>{line}</div>)}
                                                 </div>
                                             </>
@@ -1585,7 +1558,7 @@ export default function BookingWizard({
                                         const edgeCaseIds = Object.entries(edgeCases).filter(([, v]) => v).map(([k]) => k);
                                         rows.push(
                                             { label: "Load Size", value: LOAD_TIERS[tierIndex].title },
-                                            { label: "Truck Load", value: isOnSiteEstimate ? "Confirmed on site" : tierData ? `${LOAD_TIERS[tierIndex].label} ($${displayJunkTotal(roundTo5(tierData.min + totalAdj))} – $${displayJunkTotal(roundTo5(tierData.max + totalAdj))})` : "—" },
+                                            { label: "Truck Load", value: isOnSiteEstimate ? "Confirmed on site" : tierData ? `${LOAD_TIERS[tierIndex].label} ($${displaySameDayTotal(roundTo5(tierData.min + totalAdj))} – $${displaySameDayTotal(roundTo5(tierData.max + totalAdj))})` : "—" },
                                             { label: "Location", value: LOCATION_OPTIONS.find(l => l.id === location)?.label || "—" },
                                             ...(edgeCaseIds.length > 0 ? [{ label: "Special Conditions", value: edgeCaseIds.map(id => EDGE_CASES.find(e => e.id === id)?.label || id).join(", ") }] : []),
                                         );
@@ -1722,7 +1695,7 @@ export default function BookingWizard({
                             {submitting ? "Submitting..." : serviceType === "dumpster" ? "Confirm Dumpster Rental →" : serviceType === "both" ? "Confirm & Book →" : "Confirm & Book My Pickup →"}
                         </button>
                         <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
-                            {serviceType === "dumpster" ? "The rental base rate may be charged on approval or when your card is saved for an approved rental." : serviceType === "both" ? "Each service request is confirmed separately. The rental base rate may be charged on approval." : "No payment today — final price confirmed when our crew arrives."}
+                            {serviceType === "dumpster" ? "The rental subtotal may be charged on approval or when your card is saved for an approved rental." : serviceType === "both" ? "Each service request is confirmed separately. The rental subtotal may be charged on approval." : "No payment today — final price confirmed when our crew arrives."}
                         </p>
                     </div>
                 )}

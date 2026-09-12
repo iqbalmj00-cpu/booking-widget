@@ -65,3 +65,19 @@ export function rentalTermsLines(terms: RentalTerms): string[] {
     }
     return lines;
 }
+
+/** A current availability response carries the same resolved tier base as rental acceptance. */
+export function rentalQuoteBase(tier: { baseRate: number; baseRateMin?: number | null } | undefined,
+    availability: { baseRate?: number | null } | null): number | null {
+    const value = availability && Object.prototype.hasOwnProperty.call(availability, "baseRate")
+        ? availability.baseRate : tier?.baseRateMin ?? tier?.baseRate;
+    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Acceptance rounds the discount first, caps it, then subtracts it from base + fee. */
+export function rentalQuoteSubtotal(before: number, promo?: { discountType?: string; discountValue?: number } | null): number {
+    const raw = promo?.discountType === "percentage" ? before * (promo.discountValue ?? 0) / 100
+        : promo?.discountType === "flat" ? promo.discountValue ?? 0 : 0;
+    const discount = Number.isFinite(raw) ? Math.min(before, Math.max(0, Math.round(raw * 100) / 100)) : 0;
+    return Math.round((before - discount) * 100) / 100;
+}
