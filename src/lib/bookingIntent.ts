@@ -87,9 +87,9 @@ export function readWizardDraft(raw: string | null) {
             for (const value of Object.values(draft.contact)) if (typeof value !== "string") return { recoveryBlocked: true };
         }
         for (const key of ["step", "distanceSurcharge", "distanceMiles"]) if (draft[key] != null && (typeof draft[key] !== "number" || !Number.isFinite(draft[key]) || draft[key] < 0)) return { recoveryBlocked: true };
-        // The estimator exposes five selections (0–4); the sixth data entry is not selectable.
+        // The estimator exposes six selections (0–5), including the existing 1+ load tier.
         // Keep the existing identity/attempts for review, but use a safe render index.
-        if (draft.tierIndex != null && (!Number.isInteger(draft.tierIndex) || draft.tierIndex < 0 || draft.tierIndex > 4)) {
+        if (draft.tierIndex != null && (!Number.isInteger(draft.tierIndex) || draft.tierIndex < 0 || draft.tierIndex > 5)) {
             return { ...draft, tierIndex: 1, recoveryBlocked: true };
         }
         return draft;

@@ -1,231 +1,101 @@
-.root {
-    background: transparent;
-    color: #0f172a;
+.root.root { --ve-ink:#24302b; --ve-muted:#626b64; --ve-line:#dedfd7; color:var(--ve-ink); margin:24px 0 0; }
+.root .selectorHead { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 1px 10px; }
+.root .eyebrow { margin:0; font-size:10px; font-weight:750; text-transform:uppercase; letter-spacing:.11em; color:var(--ve-muted); }
+.root .helper { font-size:11px; color:var(--ve-muted); }
+.root .radioRow { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:6px; padding:6px; background:#f0f1ec; border:1px solid var(--ve-line); border-radius:14px; }
+.root .radio { min-width:0; min-height:90px; border:1px solid transparent; border-radius:9px; background:transparent; color:var(--ve-muted); font:inherit; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; cursor:pointer; transition:background .15s,border-color .15s; }
+.root .radio:hover { background:#fff9; }
+.root .radio[aria-checked="true"] { background:#fff; border-color:var(--ve-brand); color:var(--ve-ink); box-shadow:0 2px 5px #24302b0d; }
+.root .radio:focus-visible { outline:3px solid var(--ve-brand); outline-offset:3px; }
+.root .radio strong { font-size:19px; line-height:1.2; letter-spacing:-.04em; }
+.root .radioCaption { font-size:10px; line-height:1.2; }
+.root .miniBed { display:block; width:34px; height:12px; padding:2px; border:1px solid #a3a99f; border-top:0; margin-bottom:5px; }
+.root .miniBed > span { display:block; height:100%; background:#a3a99f; margin-left:auto; }
+.root .miniBedPlus { position:relative; }
+.root .miniBedPlus::after { content:"+"; position:absolute; right:-9px; top:-6px; font-size:12px; font-weight:700; color:var(--ve-brand); }
+.root .radio[aria-checked="true"] .miniBed > span { background:var(--ve-brand); }
+.root .panels { display:grid; grid-template-columns:1fr; gap:24px; margin-top:24px; }
+.root .truckPanel { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.4fr); align-items:center; min-width:0; background:#eeede8; border:1px solid #e4e3dc; border-radius:15px; overflow:hidden; }
+.root .truckHeading { grid-column:1; grid-row:1; padding:23px 22px 0; }
+.root .title { font-size:28px; line-height:1.15; letter-spacing:-.045em; font-weight:700; margin:7px 0 10px; }
+.root .copy { font-size:12px; line-height:1.5; color:var(--ve-muted); margin:0; }
+.root .tierComparison { font-size:13px; line-height:1.45; font-weight:600; margin:0 0 8px; }
+.root .tierDetails { grid-column:1; grid-row:2; padding:0 22px; }
+.root .volumeAmount { margin:0 0 12px; color:var(--ve-muted); font-size:11px; }
+.root .dimensionGuides { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.root .dimensionRule { fill:none; stroke:#36483f; stroke-width:1.2; stroke-linecap:square; }
+.root .dimensionExtension { fill:none; stroke:#607165; stroke-opacity:.6; stroke-width:.8; }
+.root .dimensionText { fill:#28372e; stroke:#f3f2e9; stroke-width:3; stroke-linejoin:round; paint-order:stroke fill; font-family:Arial,sans-serif; font-size:36px; font-weight:600; }
+.root .truckVisual { grid-column:2; grid-row:1/4; position:relative; padding:0; border:0; background:transparent; cursor:zoom-in; }
+.root .truckDrawing { position:relative; }
+.root .fullBedNote { grid-column:1/-1; margin:0; padding:10px 22px 14px; text-align:center; font-size:12px; color:var(--ve-muted); border-top:1px solid var(--ve-line); }
+.root .truckVisual:focus-visible { outline:3px solid var(--ve-brand); outline-offset:-3px; }
+.root .truckImage { width:100%; height:auto; object-fit:contain; display:block; mix-blend-mode:multiply; margin:0; }
+.root .capacity { grid-column:1; grid-row:3; padding:8px 22px 20px; }
+.root .multiEstimate { margin:0; font-size:13px; font-weight:700; }
+.root .multiEstimate span { display:block; margin-top:5px; font-size:11px; font-weight:400; line-height:1.5; color:var(--ve-muted); }
+.root .capacityTrack { height:7px; background:#d6d8cf; border-radius:5px; overflow:hidden; }
+.root .capacityTrack > span { display:block; height:100%; background:var(--ve-brand); border-radius:5px; transition:width .2s; }
+.root .capacityLabels { display:flex; justify-content:space-between; font-size:10px; color:var(--ve-muted); margin-top:8px; }
+.root .capacityLabels strong { color:var(--ve-ink); }
+.root .examplesPanel { min-width:0; }
+.root .examplesHeading { margin:0 0 14px; }
+.root .examplesTitle { font-size:18px; line-height:1.2; font-weight:700; letter-spacing:-.03em; margin:0 0 5px; }
+.root .examples { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 12px; }
+.root .example { min-width:0; margin:0; }
+.root .exampleVisual { display:block; width:100%; padding:0; cursor:zoom-in; position:relative; border-radius:10px; background:#eeede8; overflow:hidden; border:1px solid #e5e4de; }
+.root .exampleImage { display:block; width:100%; height:auto; aspect-ratio:3/2; object-fit:contain; }
+.root .exampleNumber { position:absolute; z-index:1; top:8px; left:8px; color:#4c554c; font-size:9px; font-weight:650; font-variant-numeric:tabular-nums; }
+.root .caption { display:flex; flex-direction:column; padding:8px 1px 0; gap:2px; }
+.root .caption strong { font-size:14px; line-height:1.3; font-weight:700; }
+.root .caption span { font-size:12px; line-height:1.4; color:var(--ve-muted); }
+.root .guidance { display:flex; gap:10px; align-items:center; margin-top:21px; padding:13px 15px; background:#f5f6f1; border-radius:10px; }
+.root .guidanceIcon { flex-shrink:0; font-size:22px; color:var(--ve-brand); }
+.root .guidance p { margin:0; font-size:12px; line-height:1.5; color:var(--ve-muted); }
+.root .guidance strong { color:var(--ve-ink); }
+.root .footnote { margin:10px 1px 0; color:#697168; font-size:10px; line-height:1.6; }
+.root .srOnly { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media(max-width:700px) {
+  .root.root { margin-top:20px; }
+  .root .panels { grid-template-columns:1fr; gap:22px; margin-top:16px; }
+
+  .root .truckHeading { padding:16px 16px 8px; }
+  .root .tierDetails { padding:0 16px; }
+  .root .truckHeading .copy { font-size:11px; }
+  .root .title { font-size:24px; margin:7px 0; }
+  .root .truckImage { margin:0; width:100%; }
+  .root .capacity { padding:8px 16px 14px; }
+  .root .radio { min-height:80px; }
+  .root .radioRow { gap:3px; padding:4px; }
+  .root .radio strong { font-size:18px; }
+  .root .examples { gap:14px 10px; }
+  .root .examplesTitle { font-size:18px; }
+  .root .guidance { padding:12px; }
+  .root .caption span { font-size:12px; }
+  .root .footnote { font-size:9px; }
 }
-
-.panels {
-    display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-    gap: 12px;
+@media(max-width:600px) {
+  .root .radioRow { grid-auto-flow:row; grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .root .truckPanel { grid-template-columns:1fr; }
+  .root .truckHeading { grid-column:1; grid-row:1; padding-bottom:0; }
+  .root .tierDetails { grid-column:1; grid-row:2; }
+  .root .truckVisual { grid-column:1; grid-row:3; }
+  .root .fullBedNote { grid-column:1; grid-row:4; font-size:11px; padding:12px 16px; }
+  .root .capacity { grid-column:1; grid-row:5; }
+  .root .examples { grid-template-columns:1fr; gap:20px; }
+  .root .caption strong { font-size:13px; }
+  .root .caption span { font-size:12px; }
 }
+@media(prefers-reduced-motion:reduce) { .root .radio,.root .capacityTrack > span { transition:none; } }
 
-.panel {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    border: 1px solid rgba(15, 23, 42, 0.14);
-    border-radius: 8px;
-    background: transparent;
-    box-shadow: none;
-    overflow: visible;
-}
+.root .exampleVisual:focus-visible { outline:3px solid var(--ve-brand); outline-offset:3px; }
+.root .expandIcon { position:absolute; right:7px; bottom:6px; width:18px; height:18px; font-size:13px; border-radius:50%; color:#515b53; background:#ffffffe0; }
+.root .dialog { width:min(94vw,1000px); max-width:calc(100vw - 24px); max-height:92dvh; margin:auto; padding:0; background:#f6f5ef; color:var(--ve-ink); border:1px solid #d8ddd2; border-radius:14px; box-shadow:0 20px 80px #0004; }
+.root .dialog::backdrop { background:#17241dc9; }
+.root .dialogHead { position:sticky; top:0; z-index:2; background:#f6f5ef; display:flex; justify-content:space-between; align-items:center; padding:18px; gap:16px; }
+.root .dialogHead strong { font-size:18px; }
+.root .dialogHead p { margin:5px 0 0; font-size:11px; color:var(--ve-muted); }
+.root .dialogHead button { flex-shrink:0; white-space:nowrap; font:inherit; font-size:12px; padding:9px 12px; border-radius:8px; background:white; border:1px solid #d8ddd2; cursor:pointer; }
+.root .enlargedImage { width:100%; height:auto; display:block; }
 
-.panelHead {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 12px 12px 0;
-    min-height: 48px;
-}
-
-.eyebrow {
-    margin: 0 0 3px;
-    font-size: 11px;
-    line-height: 1.15;
-    font-weight: 800;
-    color: var(--ve-brand);
-    text-transform: uppercase;
-}
-
-.title {
-    margin: 0;
-    color: #0f172a;
-    font-family: var(--heading-font);
-    font-size: 15px;
-    line-height: 1.25;
-    font-weight: 850;
-    letter-spacing: 0;
-}
-
-.visual {
-    display: flex;
-    align-items: center;
-    flex: 1 1 auto;
-    justify-content: center;
-    background: transparent;
-    overflow: visible;
-    padding: 8px 12px 4px;
-}
-
-.visualLarge {
-    padding: 0 4px 4px;
-}
-
-.truckVisual {
-    min-height: 318px;
-}
-
-.image {
-    display: block;
-    width: auto;
-    height: auto;
-    max-width: 100%;
-    object-fit: contain;
-}
-
-.truckStage {
-    position: relative;
-    width: 110%;
-    max-width: 110%;
-    isolation: isolate;
-}
-
-.truckImage {
-    width: 100%;
-    max-width: 100%;
-}
-
-.imageLarge {
-    width: 110%;
-    max-width: 110%;
-}
-
-.dimensionOverlay {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
-    pointer-events: none;
-    display: block;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-}
-
-.copy {
-    margin: auto 0 0;
-    padding: 0 12px 12px;
-    color: #475569;
-    font-size: 12.5px;
-    line-height: 1.45;
-}
-
-.controls {
-    margin-top: 12px;
-    border: 1px solid rgba(15, 23, 42, 0.14);
-    border-radius: 8px;
-    background: transparent;
-    box-shadow: none;
-    padding: 10px;
-}
-
-.controlHead {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 9px;
-    color: #475569;
-    font-size: 12px;
-    line-height: 1.35;
-}
-
-.radioRow {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 7px;
-}
-
-.radio {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 48px;
-    border: 1.5px solid rgba(15, 23, 42, 0.16);
-    border-radius: 8px;
-    background: transparent;
-    color: #334155;
-    cursor: pointer;
-    font-family: inherit;
-    padding: 8px 6px;
-    text-align: center;
-}
-
-.radio[aria-checked="true"] {
-    border-color: var(--ve-brand);
-    background: rgba(var(--ve-brand-rgb), 0.1);
-    color: #0f172a;
-    box-shadow: 0 0 0 3px rgba(var(--ve-brand-rgb), 0.16);
-}
-
-.radio:focus-visible {
-    outline: 3px solid rgba(var(--ve-brand-rgb), 0.35);
-    outline-offset: 2px;
-}
-
-.radio strong {
-    display: block;
-    font-size: 12px;
-    line-height: 1.1;
-}
-
-@media (max-width: 760px) {
-    .panels {
-        grid-template-columns: 1fr;
-    }
-}
-
-@media (max-width: 430px) {
-    .panelHead {
-        padding: 10px 10px 0;
-    }
-
-    .visual {
-        padding-inline: 8px;
-    }
-
-    .visualLarge {
-        padding-inline: 2px;
-    }
-
-    .truckVisual {
-        min-height: 280px;
-    }
-
-    .truckStage {
-        width: 106%;
-        max-width: 106%;
-    }
-
-    .imageLarge {
-        width: 106%;
-        max-width: 106%;
-    }
-
-    .copy {
-        padding: 0 10px 10px;
-    }
-
-    .radioRow {
-        gap: 5px;
-    }
-
-    .radio {
-        min-height: 46px;
-        padding: 8px 3px;
-    }
-
-    .radio strong {
-        font-size: 11px;
-    }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    .radio {
-        transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, color 160ms ease, transform 160ms ease;
-    }
-
-    .radio:hover {
-        transform: translateY(-1px);
-    }
-}
+.root .yardNote { color: #66523a; font-size: 13px; line-height: 1.5; background: #fff8ed; border-left: 3px solid #bb8749; padding: 9px 12px; }

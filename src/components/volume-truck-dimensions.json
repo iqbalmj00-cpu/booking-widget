@@ -1,0 +1,75 @@
+{
+  "length_ft": 15,
+  "width_ft": 6,
+  "height_ft": 4.5,
+  "cubic_yards": 15,
+  "capacity_note": "Illustrative 15-yard bed; actual client dimensions unconfirmed",
+  "guides": [
+    {
+      "axis": "length",
+      "start": [
+        413.45,
+        178.46
+      ],
+      "end": [
+        864.54,
+        52.03
+      ],
+      "anchors": [
+        [
+          433.95,
+          221.16
+        ],
+        [
+          885.03,
+          94.74
+        ]
+      ],
+      "feet": 15
+    },
+    {
+      "axis": "width",
+      "start": [
+        919.57,
+        54.34
+      ],
+      "end": [
+        1044.48,
+        127.38
+      ],
+      "anchors": [
+        [
+          885.03,
+          94.74
+        ],
+        [
+          1009.95,
+          167.78
+        ]
+      ],
+      "feet": 6
+    },
+    {
+      "axis": "height",
+      "start": [
+        1067.95,
+        318.29
+      ],
+      "end": [
+        1067.95,
+        167.78
+      ],
+      "anchors": [
+        [
+          1009.95,
+          318.29
+        ],
+        [
+          1009.95,
+          167.78
+        ]
+      ],
+      "feet": 4.5
+    }
+  ]
+}

@@ -130,6 +130,82 @@ async function main(mainOptions = {}) {
         return {h,calls,events,history,storage,get completion(){return completion;}};
     }
     if (mainOptions.harness) return {wizardFixture,defaultSaved,button,loader,source,config,hooks,memory,text,nodes,widget};
+    {
+        // 1+ must be selectable, survive reload and use the existing dispatch contract.
+        const multiChoice=wizardFixture({...defaultSaved,step:2,edgeCases:{specialty:true}});
+        await multiChoice.h.flush();
+        const choose=index=>nodes(multiChoice.h.tree).find(n=>n.type?.name==='VolumeEstimator').props.onChange(index);
+        choose(5);await multiChoice.h.flush();
+        let draft=JSON.parse(multiChoice.storage.getItem('syjBookingWizard:fixture-only'));
+        assert.equal(draft.tierIndex,5);assert.equal(draft.volume,'multi');assert.equal(draft.edgeCases.multi_load,true);
+        assert.equal(draft.edgeCases.specialty,true);assert.match(text(multiChoice.h.tree),/On-Site Estimate/);
+        const multiDraft=draft;
+        choose(1);await multiChoice.h.flush();
+        draft=JSON.parse(multiChoice.storage.getItem('syjBookingWizard:fixture-only'));
+        assert.equal(draft.volume,'quarter');assert.equal(draft.edgeCases.multi_load,false);assert.equal(draft.edgeCases.specialty,true);
+        assert.ok(!text(multiChoice.h.tree).includes('On-Site Estimate'));multiChoice.h.unmount();
+
+        // Unsure remains independent from 1+, including after choosing a smaller tier.
+        const uncertain=wizardFixture({...defaultSaved,step:2,edgeCases:{unknown:true}});
+        await uncertain.h.flush();
+        for(const index of [5,1]) {
+            nodes(uncertain.h.tree).find(n=>n.type?.name==='VolumeEstimator').props.onChange(index);
+            await uncertain.h.flush();
+            const current=JSON.parse(uncertain.storage.getItem(widget?'syjBookingWizard:fixture-only':'syjBookingWizard'));
+            assert.equal(current.edgeCases.unknown,true);assert.equal(current.edgeCases.multi_load,index===5);
+            assert.match(text(uncertain.h.tree),/On-Site Estimate/);
+        }
+        nodes(uncertain.h.tree).find(n=>n.props.item?.id==='unknown').props.onChange();await uncertain.h.flush();
+        assert.ok(!text(uncertain.h.tree).includes('On-Site Estimate'));uncertain.h.unmount();
+
+        const submitted=[];
+        for(const savedMulti of [multiDraft,{...defaultSaved,edgeCases:{specialty:true,multi_load:true}}]) {
+            const restored=wizardFixture({...savedMulti,step:6});await restored.h.flush();
+            const afterReload=JSON.parse(restored.storage.getItem('syjBookingWizard:fixture-only'));
+            assert.equal(afterReload.tierIndex,5);assert.equal(afterReload.volume,'multi');
+            assert.equal(afterReload.edgeCases.multi_load,true);assert.match(text(restored.h.tree),/On-Site Estimate/);
+            button(restored.h.tree,'Confirm & Book').props.onClick();await restored.h.flush();
+            const payload=restored.calls.find(c=>c.body?.type==='booking')?.body;
+            assert.ok(payload);assert.equal(payload.metadata.truckLoad,'1+');
+            assert.equal(payload.metadata.loadTier,'More Than One Truck Load');
+            assert.equal(payload.metadata.isOnSiteEstimate,true);assert.equal(payload.metadata.quoteRange,'On-Site Estimate');
+            assert.ok(payload.metadata.specialConditions.includes('multi_load'));
+            assert.match(payload.description,/More Than One Truck Load/);
+            assert.match(payload.metadata.edgeCaseNote,/more than one truck load/);
+            assert.ok(!payload.metadata.edgeCaseNote.includes('unsure'));
+            assert.equal(payload.value,undefined);assert.equal(payload.metadata.quoteMin,undefined);
+            assert.equal(payload.metadata.quoteMax,undefined);assert.equal(payload.metadata.priceRange,null);
+            submitted.push(payload);restored.h.unmount();
+        }
+        for(const key of ['truckLoad','loadTier','isOnSiteEstimate','quoteRange','edgeCaseNote','priceRange']) {
+            assert.deepEqual(submitted[0].metadata[key],submitted[1].metadata[key]);
+        }
+
+        // Render the real estimator so exposing 1+ cannot silently select Full instead.
+        const estimatorHooks=hooks();
+        const estimatorDir=path.join(source,'components');
+        const estimatorLoader=loader({react:estimatorHooks.api,
+            [path.join(estimatorDir,'VolumeEstimator.module.css')]:{},
+            [path.join(estimatorDir,'volumeAssets.ts')]:{volumeAsset:(style,stem)=>`/${style}/${stem}`},
+            [path.join(estimatorDir,'volume-example-dimensions.json')]:JSON.parse(fs.readFileSync(path.join(estimatorDir,'volume-example-dimensions.json'),'utf8')),
+            [path.join(estimatorDir,'volume-truck-dimensions.json')]:JSON.parse(fs.readFileSync(path.join(estimatorDir,'volume-truck-dimensions.json'),'utf8')),
+        });
+        const {VolumeEstimator}=estimatorLoader.load(path.join(estimatorDir,'VolumeEstimator.tsx'));
+        const {LOAD_TIERS}=basic.load(path.join(source,'lib/wizardData.ts'));
+        estimatorHooks.mount(()=>{const [value,onChange]=estimatorHooks.api.useState(1);return VolumeEstimator({levels:LOAD_TIERS,value,onChange,brandColor:'#d8662d'});});
+        let radios=nodes(estimatorHooks.tree).filter(n=>n.props.role==='radio');assert.equal(radios.length,6);
+        radios[5].props.onClick();await estimatorHooks.flush();
+        radios=nodes(estimatorHooks.tree).filter(n=>n.props.role==='radio');
+        assert.equal(radios[5].props['aria-checked'],true);assert.equal(radios.filter(n=>n.props['aria-checked']).length,1);
+        assert.match(text(estimatorHooks.tree),/More than one provider truckload/);assert.match(text(estimatorHooks.tree),/Compare with one full load/);
+        assert.ok(!text(estimatorHooks.tree).includes('Up to 15 cubic yards'));
+        const pictureSources=nodes(estimatorHooks.tree).map(n=>n.props.src).filter(Boolean);
+        assert.ok(pictureSources.length>=4 && pictureSources.every(src=>src.includes('/full-')));
+        nodes(estimatorHooks.tree).find(n=>n.props.role==='radiogroup').props.onKeyDown({key:'Home',preventDefault(){}});await estimatorHooks.flush();
+        assert.equal(nodes(estimatorHooks.tree).filter(n=>n.props.role==='radio')[0].props['aria-checked'],true);
+        nodes(estimatorHooks.tree).find(n=>n.props.role==='radiogroup').props.onKeyDown({key:'End',preventDefault(){}});await estimatorHooks.flush();
+        assert.equal(nodes(estimatorHooks.tree).filter(n=>n.props.role==='radio')[5].props['aria-checked'],true);estimatorHooks.unmount();
+    }
     const f=wizardFixture();await f.h.flush();
     assert.equal(button(f.h.tree,'Continue').props.disabled,false);
     button(f.h.tree,'Continue').props.onClick();await f.h.flush();

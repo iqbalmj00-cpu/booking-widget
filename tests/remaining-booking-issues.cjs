@@ -26,12 +26,12 @@ async function main() {
  // Corruption must render recovery, retain identities and frozen requests, and send nothing.
  const id='123e4567-e89b-42d3-a456-426614174000';
  const intent={version:1,legacy:false,bookingSessionId:id,leadId:'existing-lead',attempts:{junk:{payload:{name:'Fixture',phone:'2025550198',bookingSessionId:id,value:200}}}};
- for(const tierIndex of [-1,1.5,5,999,'1',{},[],true]){
+ for(const tierIndex of [-1,1.5,6,999,'1',{},[],true]){
   const draft=flow.readWizardDraft(JSON.stringify({...fresh,tierIndex,intent}));assert.equal(draft.recoveryBlocked,true);assert.equal(draft.intent.bookingSessionId,id);
   const restored=flow.restoreIntent(draft);assert.equal(restored.blocked,true);assert.equal(restored.bookingSessionId,id);assert.equal(restored.attempts.junk.payload.value,200);
   const f=fixture(draft);await f.h.flush();assert.match(text(f.h.tree),/saved booking could not be read safely/i);assert.equal(f.calls.filter(c=>c.body?.type).length,0);const again=flow.restoreIntent(flow.readWizardDraft(f.storage.getItem(key)));assert.equal(again.blocked,true);assert.equal(again.bookingSessionId,id);f.h.unmount();
  }
- for(const tierIndex of [0,1,2,3,4]) {const draft=flow.readWizardDraft(JSON.stringify({...fresh,tierIndex,intent}));assert.ok(!draft.recoveryBlocked);assert.equal(draft.tierIndex,tierIndex);assert.equal(flow.restoreIntent(draft).bookingSessionId,id);const f=fixture(draft);await f.h.flush();f.h.unmount();}
+ for(const tierIndex of [0,1,2,3,4,5]) {const draft=flow.readWizardDraft(JSON.stringify({...fresh,tierIndex,intent}));assert.ok(!draft.recoveryBlocked);assert.equal(draft.tierIndex,tierIndex);assert.equal(flow.restoreIntent(draft).bookingSessionId,id);const f=fixture(draft);await f.h.flush();f.h.unmount();}
  for(const raw of ['{','[]','null']) assert.equal(flow.readWizardDraft(raw).recoveryBlocked,true);
  // Rental quote and payload: both service modes, flat/percentage fees, promos, scopes and current server verdict.
  for(const serviceType of ['dumpster','both']) for(const [settings,promo,expected] of [

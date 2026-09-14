@@ -200,11 +200,18 @@ export default function BookingWizard({
     const fieldId = useId();
     const mode = config.offersDumpsterRental ? companyMode(config.companyMode, true) : "junk_removal";
     const leadIdRef = useRef<string | null>(typeof saved?.leadId === "string" ? saved.leadId : null);
-    const initialTierIndex = Math.max(0, Math.min(4, saved?.tierIndex ?? 1));
+    const savedTierIndex = saved?.edgeCases?.[MULTI_LOAD_EDGE_CASE_ID] || saved?.volume === "multi"
+        ? LOAD_TIERS.findIndex(tier => tier.volumeId === "multi")
+        : saved?.tierIndex;
+    const initialTierIndex = typeof savedTierIndex === "number" && Number.isFinite(savedTierIndex)
+        ? Math.max(0, Math.min(LOAD_TIERS.length - 1, Math.trunc(savedTierIndex))) : 1;
 
     const [step, setStep] = useState(saved?.step ?? 0);
     const [tierIndex, setTierIndex] = useState<number>(initialTierIndex);
-    const [edgeCases, setEdgeCases] = useState<Record<string, boolean>>(saved?.edgeCases ?? {});
+    const [edgeCases, setEdgeCases] = useState<Record<string, boolean>>({
+        ...saved?.edgeCases,
+        [MULTI_LOAD_EDGE_CASE_ID]: LOAD_TIERS[initialTierIndex].volumeId === "multi",
+    });
     const [volume, setVolume] = useState<string | null>(LOAD_TIERS[initialTierIndex].volumeId);
     const [location, setLocation] = useState<string | null>(saved?.location ?? null);
     const [selectedDate, setSelectedDate] = useState<Date | null>(restoreCalendarDate(saved?.selectedDate));
@@ -467,13 +474,18 @@ export default function BookingWizard({
             return next;
         });
 
-    // Both mean "more than one truck": the checkbox the customer ticks, and the
-    // sixth LOAD_TIERS entry (unreachable today — the estimator stops at five).
+    // The visible 1+ choice uses the existing multiple-load request contract.
     const multiTruckLoad = !!edgeCases[MULTI_LOAD_EDGE_CASE_ID] || volume === "multi";
     const isOnSiteEstimate = !!edgeCases["unknown"] || multiTruckLoad;
 
     /* ── Sync tierIndex → volume ── */
     useEffect(() => { setVolume(LOAD_TIERS[tierIndex].volumeId); }, [tierIndex]);
+
+    const selectLoadTier = (index: number) => {
+        setTierIndex(index);
+        setVolume(LOAD_TIERS[index].volumeId);
+        setEdgeCases(prev => ({ ...prev, [MULTI_LOAD_EDGE_CASE_ID]: LOAD_TIERS[index].volumeId === "multi" }));
+    };
 
     /* ── Pricing from config ─────────────────────────────────────── */
     const pricing = config.pricing;
@@ -1116,34 +1128,16 @@ export default function BookingWizard({
                             <h1 style={{ fontFamily: "var(--heading-font)", fontSize: 24, fontWeight: 700, color: "var(--foreground)", margin: "0 0 4px", letterSpacing: -0.3 }}>
                                 How much junk are we hauling?
                             </h1>
-                            <p style={{ fontSize: 14, color: "var(--muted)", margin: 0 }}>Pick the closest real-world load size before we price the visit.</p>
+                            <p style={{ fontSize: 14, color: "var(--muted)", margin: 0 }}>Choose a load size, then compare it with the examples.</p>
                         </div>
 
                         <div style={{ margin: "0 12px" }}>
                             <VolumeEstimator
                                 levels={LOAD_TIERS}
                                 value={tierIndex}
-                                onChange={setTierIndex}
+                                onChange={selectLoadTier}
                                 brandColor={config.brandColor}
                             />
-                        </div>
-
-                        {/* Tier Title + Description (price moved to bottom of phase) */}
-                        <div style={{ margin: "20px 12px 0", padding: "20px 24px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                                <div style={{ flexShrink: 0, width: 40, height: 40, borderRadius: 10, background: "rgba(var(--brand-rgb, 249,115,22),0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <Truck size={20} color="var(--brand)" />
-                                </div>
-                                <div style={{ fontFamily: "var(--heading-font)", fontSize: 22, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.2 }}>
-                                    {LOAD_TIERS[tierIndex].title}
-                                    {LOAD_TIERS[tierIndex].popular && (
-                                        <span style={{ fontSize: 10, fontWeight: 700, color: "var(--brand)", background: "rgba(var(--brand-rgb, 249,115,22),0.06)", padding: "2px 8px", borderRadius: 999, marginLeft: 8, verticalAlign: "middle", letterSpacing: 0.3, textTransform: "uppercase" }}>
-                                            Standard option
-                                        </span>
-                                    )}
-                                </div>
-                            </div>
-                            <p style={{ fontSize: 14, color: "var(--muted)", margin: 0, lineHeight: 1.55, paddingLeft: 52 }}>{LOAD_TIERS[tierIndex].desc}</p>
                         </div>
 
                         {/* Guarantee badge */}
@@ -1197,7 +1191,7 @@ export default function BookingWizard({
                         <div style={{ margin: "12px 12px 0", padding: "18px 20px", background: "var(--card, #fff)", borderRadius: "var(--card-radius, 16px)", border: "1px solid var(--border, #e2e8f0)", boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
                             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Does your load include any of the following?</div>
                             <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>These may require a custom quote.</div>
-                            {EDGE_CASES.map((item, i) => (
+                            {EDGE_CASES.filter(ec => ec.id !== MULTI_LOAD_EDGE_CASE_ID).map((item, i) => (
                                 <div key={item.id}>
                                     {i > 0 && <div style={{ height: 1, background: "var(--border, #f1f5f9)" }} />}
                                     <EdgeToggle item={item} checked={!!edgeCases[item.id]} onChange={() => toggleEdge(item.id)} />

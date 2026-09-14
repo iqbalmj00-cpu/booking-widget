@@ -1,0 +1,72 @@
+{
+  "few": {
+    "furniture": {
+      "description": "1 armchair and 6 small moving boxes."
+    },
+    "boxes": {
+      "description": "8 medium moving boxes and 2 garbage bags."
+    },
+    "mixed": {
+      "description": "1 washing machine, 2 medium moving boxes and 1 garbage bag."
+    },
+    "yard": {
+      "description": "One loose mound of leafy branches, garden cuttings and cut limbs."
+    }
+  },
+  "quarter": {
+    "furniture": {
+      "description": "1 couch and 4 medium moving boxes."
+    },
+    "boxes": {
+      "description": "18 medium moving boxes and 3 garbage bags."
+    },
+    "mixed": {
+      "description": "1 couch and 1 washing machine."
+    },
+    "yard": {
+      "description": "One loose mound of leafy branches, garden cuttings and cut limbs."
+    }
+  },
+  "half": {
+    "furniture": {
+      "description": "2 couches and 12 medium moving boxes."
+    },
+    "boxes": {
+      "description": "48 medium moving boxes and 3 garbage bags."
+    },
+    "mixed": {
+      "description": "1 couch, 1 refrigerator, 1 washing machine and 3 medium moving boxes."
+    },
+    "yard": {
+      "description": "One loose mound of leafy branches, garden cuttings and cut limbs."
+    }
+  },
+  "three_quarter": {
+    "furniture": {
+      "description": "3 couches and 1 armchair."
+    },
+    "boxes": {
+      "description": "72 medium moving boxes and 6 garbage bags."
+    },
+    "mixed": {
+      "description": "2 couches, 1 refrigerator, 1 washing machine and 3 small moving boxes."
+    },
+    "yard": {
+      "description": "One loose mound of leafy branches, garden cuttings and cut limbs."
+    }
+  },
+  "full": {
+    "furniture": {
+      "description": "3 couches, 2 dressers and 14 small moving boxes."
+    },
+    "boxes": {
+      "description": "96 medium moving boxes and 6 garbage bags."
+    },
+    "mixed": {
+      "description": "2 refrigerators, 1 washing machine and 76 medium moving boxes."
+    },
+    "yard": {
+      "description": "One loose mound of leafy branches, garden cuttings and cut limbs."
+    }
+  }
+}
