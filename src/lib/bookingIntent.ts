@@ -10,6 +10,8 @@ export type BookingOutcome = {
     rental: ({ status: string | null; deliveryJobId: string | null; deliveryStatus: string | null; deliveryCompleted: boolean } & RentalTerms) | null;
     pricing: { status: "accepted" | "unknown"; subtotal: number | null; subtotalMax: number | null; base: number | null; discount: number | null; fees: { kind: string; amount: number }[]; promo: { status: string }; tax: null; total: null };
     payment: { status: "unknown" }; alternatives: { date: string; slot: string | null; start: string | null; end: string | null }[];
+    /** Rental turned away for stock: soonest free calendar date and other sizes free that day. */
+    nextAvailableDate: string | null; alternativeSizes: number[];
 };
 export type ServiceAttempt = { payload: Record<string, unknown>; acknowledgement?: BookingOutcome };
 export type BookingIntent = {
@@ -61,6 +63,8 @@ export function readOutcome(envelope: BookingEnvelope, service: ServiceLeg): Boo
             promo: { status: promo && ["applied", "unavailable", "not_requested", "pending", "operator_override"].includes(promo) ? promo : "unknown" }, tax: null, total: null },
         payment: { status: "unknown" },
         alternatives: Array.isArray(d.alternatives) ? d.alternatives.flatMap(a => { const v = obj(a); const date = str(v.date); return date ? [{ date, slot: str(v.slot), start: str(v.start), end: str(v.end) }] : []; }) : [],
+        nextAvailableDate: typeof d.nextAvailableDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.nextAvailableDate) ? d.nextAvailableDate : null,
+        alternativeSizes: Array.isArray(d.alternativeSizes) ? d.alternativeSizes.filter((s): s is number => Number.isSafeInteger(s) && s > 0) : [],
     };
 }
 
@@ -134,6 +138,18 @@ export const canReviseCapture = (intent: BookingIntent) => !hasAttempts(intent)
     && intent.captureAcknowledgement?.outcome === "rejected"
     && [400, 422].includes(intent.captureAcknowledgement.httpStatus);
 export const hasAttempts = (intent: BookingIntent) => legs.some(s => !!intent.attempts[s]);
+/** A dumpster-only booking turned away for stock was definitively refused (409,
+ * nothing accepted), so the customer may pick again in the same booking session.
+ * Returns that refusal for its alternatives. Every other outcome stays frozen.
+ */
+export function reopenTurnedAwayRental(intent: BookingIntent, persist: () => boolean): BookingOutcome | null {
+    const attempt = intent.attempts.dumpster, ack = attempt?.acknowledgement, paymentMethodId = intent.paymentMethodId;
+    if (intent.blocked || intent.attempts.junk || !ack || ack.outcome !== "rejected" || ack.code !== "no_container_available" || ack.httpStatus !== 409) return null;
+    // Nothing was accepted, so that card was never attached: the resubmit saves the card entered again.
+    delete intent.attempts.dumpster; delete intent.paymentMethodId;
+    if (!persist()) { intent.attempts.dumpster = attempt; intent.paymentMethodId = paymentMethodId; return null; }
+    return ack;
+}
 export const resolvedOutcome = (a?: BookingOutcome) => !!a && ["scheduled", "request_saved", "pending_approval", "closed"].includes(a.outcome);
 export const intentOutcomes = (intent: BookingIntent) => Object.fromEntries(legs.flatMap(s => intent.attempts[s]?.acknowledgement ? [[s, intent.attempts[s]!.acknowledgement!]] : [])) as Partial<Record<ServiceLeg, BookingOutcome>>;
 export const canResume = (intent: BookingIntent) => !intent.blocked && legs.some(s => intent.attempts[s] && (!intent.attempts[s]!.acknowledgement || intent.attempts[s]!.acknowledgement!.outcome === "uncertain"));
@@ -194,6 +210,10 @@ export function outcomeMessage(a: BookingOutcome): string {
     if (a.outcome === "closed") return "This booking is closed. Contact us about its history or start a separate booking.";
     if (a.outcome === "pending_approval") return "Rental request received. Approval and availability still need confirmation.";
     if (a.outcome === "request_saved") return "Request received. Scheduling still needs confirmation.";
+    if (a.outcome === "rejected" && a.code === "no_container_available") {
+        const next = a.nextAvailableDate ? new Date(`${a.nextAvailableDate}T00:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }) : null;
+        return `No dumpster of that size is free for your date, so it was not booked.${next ? ` The next free date is ${next}.` : ""}${a.alternativeSizes.length ? ` Sizes in stock for your date: ${a.alternativeSizes.map(s => `${s} yd³`).join(", ")}.` : ""} Contact us to arrange a dumpster.`;
+    }
     if (a.outcome === "rejected") return a.code === "capacity" ? "That time could not be accepted. Contact us to review the available alternatives." : "Check your contact details, address and selected date with us before booking again.";
     return "We couldn't confirm this request. Check its status below or call us before submitting again.";
 }
