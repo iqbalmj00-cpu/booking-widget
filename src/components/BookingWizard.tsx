@@ -468,6 +468,26 @@ export default function BookingWizard({
         // If step === 0, browser back navigates away from /book naturally
     };
 
+    // Steps swap in place, so without this the next step opened at whatever
+    // depth the last one was scrolled to — often the footer. Line the wizard
+    // top up under the sticky site header after hydration and on every step change.
+    const wizardTopRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (!hydrated) return;
+        const top = wizardTopRef.current?.getBoundingClientRect().top;
+        if (top === undefined) return;
+        const header = document.querySelector("header");
+        const headerHeight = header && ["sticky", "fixed"].includes(getComputedStyle(header).position) ? header.getBoundingClientRect().height : 0;
+        window.scrollTo({ top: window.scrollY + top - headerHeight, behavior: "instant" });
+    }, [currentStep, hydrated]);
+    // Back/Forward between steps would otherwise have the browser restore the
+    // old scroll depth a moment later and undo the alignment above.
+    useEffect(() => {
+        const previous = window.history.scrollRestoration;
+        window.history.scrollRestoration = "manual";
+        return () => { window.history.scrollRestoration = previous; };
+    }, []);
+
     const toggleEdge = (id: string) =>
         setEdgeCases(prev => {
             const next = { ...prev, [id]: !prev[id] };
@@ -918,7 +938,7 @@ export default function BookingWizard({
     </div>;
 
     return (
-        <div style={{ minHeight: "100vh", background: "var(--background)" }}>
+        <div ref={wizardTopRef} style={{ minHeight: "100vh", background: "var(--background)" }}>
             {/* Progress bar */}
             <div style={{ maxWidth: 720, margin: "0 auto", padding: "28px 20px 0", display: "flex", gap: 6 }}>
                 {phases.map((_p: WizardPhase, i: number) => (
