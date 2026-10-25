@@ -18,7 +18,7 @@ const deny = () => { throw new Error('Unexpected outbound fetch'); };
 
 function loader(mocks = {}, globals = {}) {
     const cache = new Map();
-    const context = vm.createContext({ console, crypto:require("node:crypto").webcrypto, URL, URLSearchParams, Date:FixtureDate, Intl, Promise, setTimeout, clearTimeout, performance: { getEntriesByType: () => [{ type: 'reload' }] }, process: { env: {} }, fetch: deny, ...globals });
+    const context = vm.createContext({ console, crypto:require("node:crypto").webcrypto, URL, URLSearchParams, AbortSignal, Date:FixtureDate, Intl, Promise, setTimeout, clearTimeout, performance: { getEntriesByType: () => [{ type: 'reload' }] }, process: { env: {} }, fetch: deny, ...globals });
     function load(file) {
         file = path.resolve(file);
         if (mocks[file]) return mocks[file];
@@ -28,6 +28,7 @@ function loader(mocks = {}, globals = {}) {
         const req = name => {
             if (Object.hasOwn(mocks, name)) return mocks[name];
             if (name === 'server-only') return {}; // Next boundary marker; fixture env stays empty.
+            if (name === '@stripe/stripe-js') return {loadStripe:deny};
             if(name === 'lucide-react') return new Proxy({}, { get:(_, key)=>key==='__esModule'?true:()=>null });
             if(['next/link','next/image'].includes(name)) return {__esModule:true,default:()=>null};
             if (name.startsWith('.') || name.startsWith('@/')) {
@@ -286,6 +287,14 @@ async function main(mainOptions = {}) {
     assert.equal(onsite.calls.find(c=>c.body?.type==='booking').body.value,undefined);onsite.h.unmount();
 
     if(widget) {
+        const grant='eyJhbGciOiJIUzI1NiJ9.eyJmaXh0dXJlIjp0cnVlfQ.signature';let rentalRequest;
+        const rentalApi=loader({}, {fetch:async(url,init)=>{rentalRequest={url,init};return {ok:true,json:async()=>({mode:'selected_rental'})};}}).load(path.join(source,'lib/api.ts')).widgetApi;
+        await rentalApi.rentalPaymentCommand({action:'review',grant},config);
+        assert.equal(rentalRequest.url,config.widgetApiUrl+'/api/booking/rental-card');assert.deepEqual(Object.keys(rentalRequest.init.headers),['Content-Type']);assert.equal(rentalRequest.init.cache,'no-store');assert.ok(rentalRequest.init.signal instanceof AbortSignal);
+        assert.deepEqual(JSON.parse(rentalRequest.init.body),{action:'review',grant});rentalRequest=null;
+        await assert.rejects(rentalApi.rentalPaymentCommand({action:'review',grant,customerId:'raw'},config));assert.equal(rentalRequest,null);
+        const refused=loader({}, {fetch:async()=>({ok:false,status:403,json:async()=>({error:'Internal provider diagnostic'})})}).load(path.join(source,'lib/api.ts')).widgetApi;
+        await assert.rejects(refused.rentalPaymentCommand({action:'review',grant},config),e=>e.message.includes('authenticated customer portal')&&!e.message.includes('diagnostic'));
         let shownState = 0;
         const response=loader({}, {fetch:async()=>({ok:false,status:500,json:async()=>({error:'Internal database error'})})}).load(path.join(source,'lib/api.ts'));
         await assert.rejects(response.widgetApi.submitBooking({},config),e=>!e.message.includes('database')&&e.status===500);

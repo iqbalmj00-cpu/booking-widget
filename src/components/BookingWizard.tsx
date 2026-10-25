@@ -1,5 +1,8 @@
 import { readRentalTerms, rentalDaysForSelection, rentalTermsLines, rentalQuoteBase, rentalQuoteSubtotal, rentalMoney, rentalInclusionLines } from "../lib/rentalPricing";
-import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, reopenTurnedAwayRental, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
+import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, reopenTurnedAwayRental, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, refreshRentalApproval, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
+import type { RentalPaymentCommand, RentalPaymentRecovery } from "../lib/bookingRentalPayment";
+import { parseBookingConfirmation } from "../lib/bookingConfirmation";
+import RentalBasePaymentPanel from "./booking/RentalBasePaymentPanel";
 import BookingReceipt from "./BookingReceipt";
 import { getContainerSizes, validContainerSelection } from "../lib/containerCatalog";
 import { useState, useCallback, useMemo, useEffect, useRef, useId } from "react";
@@ -37,6 +40,7 @@ export type BookingCompleteData = {
     dumpsterError?: string; cardIssue?: CardConfirmation;
     pricingUnconfirmed?: boolean; promoRequested?: string;
     outcomes?: Partial<Record<ServiceLeg, BookingOutcome>>;
+    rentalPayment?: RentalPaymentRecovery;
 };
 
 /* ── Types ───────────────────────────────────────────────────────────────────── */
@@ -295,7 +299,7 @@ export default function BookingWizard({
         return widgetApi.createSetupIntent(apiOpts);
     }, [apiOpts]);
     const { stripeReady, cardComplete, cardError, setupError, retryCard, setupClientSecret, stripeRef, cardRef, cardMountRef } =
-        useBookingCard(config.stripePublishableKey, currentPhase === "quote" && paymentPreference === "card" && !hasAttempts(intent), createCardSetup);
+        useBookingCard(config.stripePublishableKey, currentPhase === "quote" && serviceType === "junk" && paymentPreference === "card" && !hasAttempts(intent), createCardSetup);
 
     const rememberLead = useCallback((id: string | null) => {
         leadIdRef.current = id;
@@ -815,7 +819,7 @@ export default function BookingWizard({
                 const payloads: Partial<Record<ServiceLeg, Record<string, unknown>>> = {};
                 if (serviceType === "junk" || serviceType === "both") payloads.junk = buildJunkPayload();
                 if (serviceType === "dumpster" || serviceType === "both") payloads.dumpster = buildDumpsterPayload();
-                const pmId = paymentPreference === "card" ? await confirmCard() : null;
+                const pmId = serviceType === "junk" && paymentPreference === "card" ? await confirmCard() : null;
                 if (pmId) for (const payload of Object.values(payloads)) (payload.metadata as Record<string, unknown>).stripePaymentMethodId = pmId;
                 freezeAttempts(intent, payloads, persistIntent);
                 changedIntent();
@@ -836,7 +840,7 @@ export default function BookingWizard({
             }
             const outcomes = intentOutcomes(intent);
             // Card recovery uses the saved method and customer; no new SetupIntent on replay.
-            if (intent.paymentMethodId) {
+            if (intent.paymentMethodId && !intent.attempts.dumpster) {
                 intent.cardResults ||= {};
                 for (const ack of Object.values(outcomes)) if (ack.customerId && resolvedOutcome(ack) && !intent.cardResults[ack.customerId]) {
                     await recordCardConfirmation(ack.customerId, intent.paymentMethodId);
@@ -855,7 +859,7 @@ export default function BookingWizard({
                 dumpsterPrice: outcomes.dumpster ? acceptedPriceLabel(outcomes.dumpster) || undefined : undefined,
                 pricingUnconfirmed: !Object.values(outcomes).every(a => a.pricing.status === "accepted"),
                 serviceType: Object.keys(intent.attempts).length === 2 ? "both" : Object.keys(intent.attempts)[0] || "junk", address: serviceAddress || undefined,
-                outcomes, promoRequested: promoCode || undefined, cardIssue: intent.cardIssue as CardConfirmation | undefined,
+                outcomes, rentalPayment: intent.rentalPayment, promoRequested: promoCode || undefined, cardIssue: intent.cardIssue as CardConfirmation | undefined,
                 debrisType: debrisType ? DEBRIS_TYPES.find(d => d.id === debrisType)?.label || debrisType : undefined,
                 rentalDuration: rentalDuration ? RENTAL_DURATIONS.find(r => r.id === rentalDuration)?.label || rentalDuration : undefined,
             };
@@ -868,6 +872,26 @@ export default function BookingWizard({
             changedIntent();
             setSubmitting(false);
         }
+    };
+
+    const sendRentalPayment = useCallback((command: RentalPaymentCommand) => widgetApi.rentalPaymentCommand(command, apiOpts), [apiOpts]);
+    const saveRentalPayment = (next: RentalPaymentRecovery) => {
+        intent.rentalPayment = next;
+        if (!persistIntent()) return false;
+        try {
+            const receipt = parseBookingConfirmation(sessionStorage.getItem(`${storageKey}:receipt`));
+            if (receipt?.outcomes?.dumpster?.rentalId === next.rentalId) sessionStorage.setItem(`${storageKey}:receipt`, JSON.stringify({ ...receipt, rentalPayment: next }));
+        } catch { return false; }
+        changedIntent(); return true;
+    };
+    const checkRentalApproval = async () => {
+        await refreshRentalApproval(intent, payload => widgetApi.submitBookingResponse(payload, apiOpts), persistIntent);
+        const receipt = parseBookingConfirmation(sessionStorage.getItem(`${storageKey}:receipt`));
+        if (receipt) {
+            try { sessionStorage.setItem(`${storageKey}:receipt`, JSON.stringify({ ...receipt, outcomes: intentOutcomes(intent) })); }
+            catch { throw new Error(STORAGE_MESSAGE); }
+        }
+        changedIntent();
     };
 
     const formatPhone = (val: string) => {
@@ -930,7 +954,8 @@ export default function BookingWizard({
     if (hasAttempts(intent) || intent.blocked) return <div style={{ maxWidth: 640, margin: "32px auto", padding: 20 }}>
         <h1 style={{ fontSize: 28, marginBottom: 16 }}>Your booking status</h1>
         <p style={{ marginBottom: 16 }}>{intent.blocked ? "Your saved booking could not be read safely. Please call us to check it before starting another booking." : "Your original submission is saved. Contact us to change its details. Checking status uses the same request."}</p>
-        <BookingReceipt outcomes={intentOutcomes(intent)} services={Object.keys(intent.attempts) as ServiceLeg[]} requestedDate={selectedDate ? calendarDate(selectedDate) : ""} requestedTime={selectedTime || ""} phone={config.phoneNumber} cardIssue={intent.cardIssue} />
+        <BookingReceipt outcomes={intentOutcomes(intent)} services={Object.keys(intent.attempts) as ServiceLeg[]} requestedDate={selectedDate ? calendarDate(selectedDate) : ""} requestedTime={selectedTime || ""} phone={config.phoneNumber} cardIssue={intent.cardIssue} rentalPayment={intent.rentalPayment} />
+        {intent.attempts.dumpster && !intent.blocked && <RentalBasePaymentPanel key={`${intent.attempts.dumpster.acknowledgement?.rentalId}:${intent.attempts.dumpster.acknowledgement?.rentalCard?.status}`} outcome={intent.attempts.dumpster.acknowledgement} recovery={intent.rentalPayment} publishableKey={config.stripePublishableKey} onChange={saveRentalPayment} onCheckApproval={checkRentalApproval} send={sendRentalPayment} />}
         {error && <p role="alert" style={{ marginTop: 16 }}>{error}</p>}
         {canResume(intent) && <button type="button" onClick={handleSubmit} disabled={submitting} className="btn-primary" style={{ minHeight: 44, marginTop: 16 }}>{submitting ? "Checking request…" : "Check saved booking status"}</button>}
         {!canResume(intent) && !intent.blocked && <button type="button" onClick={handleSubmit} disabled={submitting} style={{ minHeight: 44, marginTop: 16 }}>View saved receipt</button>}
@@ -1646,7 +1671,7 @@ export default function BookingWizard({
                                 </div>
 
                                 {/* ── Card on File (conditionally rendered — only in DOM when Pay Online selected) ── */}
-                                {paymentPreference === "card" && (
+                                {paymentPreference === "card" && serviceType === "junk" && (
                                     <div style={{ background: "var(--card)", borderRadius: 16, border: "1px solid var(--border, #E2E8F0)", padding: 24 }}>
                                         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                                             <Lock size={14} style={{ color: "#16A34A" }} />
@@ -1665,7 +1690,7 @@ export default function BookingWizard({
                                     </div>
                                 )}
 
-                                {paymentPreference === "card" && (
+                                {paymentPreference === "card" && serviceType === "junk" && (
                                     <div aria-live="polite" style={{ marginTop: 12 }}>
                                         {setupError ? <><p role="alert">{setupError}</p><button type="button" onClick={retryCard} style={{ minHeight: 44, padding: "10px 16px", marginTop: 8 }}>Retry card setup</button></> : !stripeReady ? <p>Loading secure card entry…</p> : null}
                                     </div>
@@ -1689,7 +1714,7 @@ export default function BookingWizard({
                                         <div style={{ fontSize: 13, color: "#166534", lineHeight: 1.5 }}>
                                             {paymentPreference === "card"
                                                 ? ((serviceType === "dumpster" || serviceType === "both")
-                                                    ? "Your rental base rate, plus applicable tax, may be charged when the rental is approved or your card is saved for an approved rental. Saving a card does not confirm a successful charge. Junk removal and extras such as additional days are billed separately."
+                                                    ? "Submit your booking first. After acceptance, review the exact rental base amount, tax and credits before approving a card save and payment. Pending requests require approval first. Junk removal and rental extras are billed separately. Existing saved-card approval behavior still applies."
                                                     : "Your card is saved securely and will only be charged after your job is complete. The final price will be confirmed by your crew on-site.")
                                                 : "You\u2019ll pay your crew directly when the job is complete. Cash, check, or card accepted on-site."}
                                         </div>
@@ -1713,7 +1738,7 @@ export default function BookingWizard({
                             </div>
                         )}
 
-                        <button onClick={handleSubmit} disabled={submitting || !termsAccepted || (hasStripe && (paymentPreference === null || (paymentPreference === "card" && !cardComplete)))}
+                        <button onClick={handleSubmit} disabled={submitting || !termsAccepted || (hasStripe && (paymentPreference === null || (serviceType === "junk" && paymentPreference === "card" && !cardComplete)))}
                             style={{
                                 width: "100%", marginTop: 24, padding: 18, borderRadius: "var(--btn-radius)", border: "none",
                                 background: !submitting ? "linear-gradient(135deg, var(--brand), var(--brand-dark))" : "#E2E8F0",
@@ -1725,7 +1750,7 @@ export default function BookingWizard({
                             {submitting ? "Submitting..." : serviceType === "dumpster" ? "Confirm Dumpster Rental →" : serviceType === "both" ? "Confirm & Book →" : "Confirm & Book My Pickup →"}
                         </button>
                         <p style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
-                            {serviceType === "dumpster" ? "The rental subtotal may be charged on approval or when your card is saved for an approved rental." : serviceType === "both" ? "Each service request is confirmed separately. The rental subtotal may be charged on approval." : "No payment today — final price confirmed when our crew arrives."}
+                            {serviceType === "dumpster" ? "After acceptance, review and approve the exact rental base payment. Existing saved-card approval behavior still applies." : serviceType === "both" ? "Each service request is confirmed separately. Review the accepted rental base before approving a new card payment." : "No payment today — final price confirmed when our crew arrives."}
                         </p>
                     </div>
                 )}

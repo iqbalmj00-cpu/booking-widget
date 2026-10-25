@@ -1,3 +1,4 @@
+import { readRentalPaymentRecovery, type RentalPaymentRecovery } from "./bookingRentalPayment";
 import { readSavedOutcomes, type BookingOutcome, type ServiceLeg } from "./bookingIntent";
 /**
  * bookingConfirmation.ts — handover of the confirmation payload from the
@@ -15,6 +16,7 @@ import { readSavedOutcomes, type BookingOutcome, type ServiceLeg } from "./booki
 
 /** Same shape as the widget's BookingCompleteData, minus its React plumbing. */
 export type BookingConfirmation = {
+    rentalPayment?: RentalPaymentRecovery;
     outcomes?: Partial<Record<ServiceLeg, BookingOutcome>>;
     name: string;
     date: string;
@@ -57,7 +59,11 @@ export function parseBookingConfirmation(raw: string | null | undefined): Bookin
     const o = parsed as Record<string, unknown>;
     // A payload with no service type is not one this wizard wrote.
     if (!str(o.serviceType)) return null;
+    const outcomes = readSavedOutcomes(o.outcomes);
+    const rentalPayment = readRentalPaymentRecovery(o.rentalPayment, outcomes.dumpster?.rentalId ?? null);
+    if (o.rentalPayment !== undefined && !rentalPayment) return null;
     return {
+        ...(rentalPayment ? { rentalPayment } : {}),
         name: str(o.name),
         date: str(o.date),
         time: str(o.time),
@@ -69,7 +75,7 @@ export function parseBookingConfirmation(raw: string | null | undefined): Bookin
         rentalDuration: str(o.rentalDuration),
         autoBooked: o.autoBooked === true,
         pricingUnconfirmed: o.pricingUnconfirmed !== false,
-        ...(o.outcomes ? { outcomes: readSavedOutcomes(o.outcomes) } : {}),
+        ...(o.outcomes ? { outcomes } : {}),
         promoRequested: str(o.promoRequested),
         dumpsterError: str(o.dumpsterError),
         cardIssue: str(o.cardIssue),

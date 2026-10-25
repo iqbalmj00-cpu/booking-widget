@@ -111,8 +111,8 @@ module.exports = async function recoveryTests() {
     let setupCount=0,cardCount=0;const active=[];
     const card={stripeReady:true,cardComplete:true,cardError:null,setupError:null,retryCard:()=>{},setupClientSecret:'fixture',stripeRef:{current:{confirmCardSetup:async()=>{setupCount++;return {setupIntent:{payment_method:'pm_fixture'}};}}},cardRef:{current:{}},cardMountRef:()=>{},active:v=>active.push(v)};
     let cardLost=true;
-    const withCard=wizardFixture({...fresh,paymentPreference:'card'},{config:{stripePublishableKey:'pk_fixture'},card,confirmCard:()=>{cardCount++;return response({success:true});},submit:init=>{if(cardLost&&service(JSON.parse(init.body))==='junk')throw Error('Lost response');return okSubmit(init);}});
-    await withCard.h.flush();button(withCard.h.tree,'Confirm & Book').props.onClick();await withCard.h.flush();assert.equal(setupCount,1);assert.equal(cardCount,1);withCard.h.unmount();
+    const withCard=wizardFixture({...fresh,serviceType:'junk',paymentPreference:'card'},{config:{stripePublishableKey:'pk_fixture'},card,confirmCard:()=>{cardCount++;return response({success:true});},submit:init=>{if(cardLost&&service(JSON.parse(init.body))==='junk')throw Error('Lost response');return okSubmit(init);}});
+    await withCard.h.flush();button(withCard.h.tree,'Pay Online').props.onClick();await withCard.h.flush();button(withCard.h.tree,'Confirm & Book').props.onClick();await withCard.h.flush();assert.equal(setupCount,1);assert.equal(cardCount,0);withCard.h.unmount();
     cardLost=false;active.length=0;
     const cardReload=wizardFixture(draft(withCard),{storage:withCard.storage,config:{stripePublishableKey:'pk_fixture'},card,confirmCard:()=>{cardCount++;return response({success:true});},submit:okSubmit});
     await cardReload.h.flush();button(cardReload.h.tree,'Check saved booking status').props.onClick();await cardReload.h.flush();assert.equal(setupCount,1);assert.equal(cardCount,1);assert.ok(active.every(v=>v===false));cardReload.h.unmount();

@@ -1,5 +1,6 @@
 import type { BookingEnvelope } from "./bookingIntent";
 import { bookingSubmitErrorMessage } from "./bookingLogic";
+import { readRentalPaymentCommand, RENTAL_PORTAL_MESSAGE, RENTAL_RECOVERY_MESSAGE, type RentalPaymentCommand } from "./bookingRentalPayment";
 /**
  * api.ts — API client for the booking widget.
  * All calls go directly to the client's dashboard API routes.
@@ -60,6 +61,17 @@ async function apiGet(path: string, params: Record<string, string>, opts: Reques
 }
 
 export const widgetApi = {
+    /** Signed accepted-rental authority only; no site token or raw customer IDs. */
+    rentalPaymentCommand: async (command: RentalPaymentCommand, opts: RequestOptions): Promise<unknown> => {
+        const checked = readRentalPaymentCommand(command);
+        if (!checked) throw new Error(RENTAL_RECOVERY_MESSAGE);
+        const response = await fetch(`${opts.widgetApiUrl}/api/booking/rental-card`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+            signal: AbortSignal.timeout(20_000), body: JSON.stringify(checked),
+        });
+        if (!response.ok) throw new Error(response.status === 409 || response.status === 403 ? RENTAL_PORTAL_MESSAGE : RENTAL_RECOVERY_MESSAGE);
+        return response.json();
+    },
     /** Booking-specific transport keeps 202/conflicts as data for durable reconciliation. */
     submitBookingResponse: async (payload: Record<string, unknown>, opts: RequestOptions): Promise<BookingEnvelope> => {
         try {

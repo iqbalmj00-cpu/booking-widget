@@ -1,10 +1,11 @@
 import { acceptedPriceLabel, outcomeMessage, savedScheduleLabel, type BookingOutcome, type ServiceLeg } from "../lib/bookingIntent";
 import { cardConfirmationNotice, type CardConfirmation } from "../lib/bookingLogic";
+import { rentalMoney, type RentalPaymentRecovery } from "../lib/bookingRentalPayment";
 import { rentalTermsLines } from "../lib/rentalPricing";
 
-export default function BookingReceipt({ outcomes, services, requestedDate, requestedTime, phone, cardIssue }: {
+export default function BookingReceipt({ outcomes, services, requestedDate, requestedTime, phone, cardIssue, rentalPayment }: {
     outcomes: Partial<Record<ServiceLeg, BookingOutcome>>; services: ServiceLeg[];
-    requestedDate?: string; requestedTime?: string; phone?: string; cardIssue?: string;
+    requestedDate?: string; requestedTime?: string; phone?: string; cardIssue?: string; rentalPayment?: RentalPaymentRecovery;
 }) {
     return <section aria-label="Booking status" aria-live="polite" style={{ display: "grid", gap: 16, textAlign: "left" }}>
         {services.map(service => {
@@ -27,7 +28,11 @@ export default function BookingReceipt({ outcomes, services, requestedDate, requ
                 {ack?.leadId && <p style={{ marginTop: 12, fontSize: 12, overflowWrap: "anywhere" }}>Request reference: {ack.leadId}</p>}
             </article>;
         })}
-        <p>Tax, final total and payment status have not been established here. A saved schedule does not confirm crew assignment or an exact arrival time.</p>
+        {rentalPayment?.result && <div aria-label="Saved rental payment receipt">
+            {rentalPayment.result.card && <p>{rentalPayment.result.card.message}</p>}
+            <p>{rentalPayment.result.payment.message}{rentalPayment.result.payment.appliedCents !== undefined ? ` ${rentalMoney(rentalPayment.result.payment.appliedCents)}` : ""}</p>
+        </div>}
+        <p>{rentalPayment?.review ? "The reviewed tax, credits and payment result apply only to the rental base shown in the payment panel. Other service totals are not established here." : "Tax, final total and payment status have not been established here."} A saved schedule does not confirm crew assignment or an exact arrival time.</p>
         {cardIssue && <p>{cardConfirmationNotice(cardIssue as CardConfirmation)}</p>}
         {phone && <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} style={{ minHeight: 44, display: "inline-flex", alignItems: "center" }}>Call to review or change your request</a>}
     </section>;

@@ -1,3 +1,4 @@
+import { readRentalCardGrant, readRentalPaymentRecovery, type RentalCardGrant, type RentalPaymentRecovery } from "./bookingRentalPayment";
 import { readRentalTerms, type RentalTerms } from "./rentalPricing";
 /** Durable, per-service booking recovery. No contact data belongs in URLs or analytics. */
 export type ServiceLeg = "junk" | "dumpster";
@@ -9,6 +10,7 @@ export type BookingOutcome = {
     schedule: { timezone: string; calendarDate: string | null; date: string | null; start: string | null; windowStart: string | null; windowEnd: string | null; timeSlot: string | null; planStatus: string | null } | null;
     rental: ({ status: string | null; deliveryJobId: string | null; deliveryStatus: string | null; deliveryCompleted: boolean } & RentalTerms) | null;
     pricing: { status: "accepted" | "unknown"; subtotal: number | null; subtotalMax: number | null; base: number | null; discount: number | null; fees: { kind: string; amount: number }[]; promo: { status: string }; tax: null; total: null };
+    rentalCard?: RentalCardGrant;
     payment: { status: "unknown" }; alternatives: { date: string; slot: string | null; start: string | null; end: string | null }[];
     /** Rental turned away for stock: soonest free calendar date and other sizes free that day. */
     nextAvailableDate: string | null; alternativeSizes: number[];
@@ -18,6 +20,7 @@ export type BookingIntent = {
     version: 1; bookingSessionId?: string; legacy: boolean; blocked?: boolean; leadId: string | null;
     attempts: Partial<Record<ServiceLeg, ServiceAttempt>>; capture?: Record<string, unknown>; captureAcknowledgement?: BookingOutcome;
     paymentMethodId?: string; cardResults?: Record<string, string>; cardIssue?: string;
+    rentalPayment?: RentalPaymentRecovery;
     analyticsSent?: boolean;
 };
 const obj = (v: unknown): Record<string, unknown> => v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -61,6 +64,7 @@ export function readOutcome(envelope: BookingEnvelope, service: ServiceLeg): Boo
             base: acceptedPrice ? money(p.base) : null, discount: acceptedPrice ? money(p.discount) : null,
             fees: acceptedPrice && Array.isArray(p.fees) ? p.fees.flatMap(f => { const fee = obj(f); return str(fee.kind) && money(fee.amount) != null ? [{ kind: String(fee.kind), amount: Number(fee.amount) }] : []; }) : [],
             promo: { status: promo && ["applied", "unavailable", "not_requested", "pending", "operator_override"].includes(promo) ? promo : "unknown" }, tax: null, total: null },
+        ...(version === 2 && service === "dumpster" && outcome === "scheduled" ? { rentalCard: readRentalCardGrant(d.rentalCard, rentalId) } : {}),
         payment: { status: "unknown" },
         alternatives: Array.isArray(d.alternatives) ? d.alternatives.flatMap(a => { const v = obj(a); const date = str(v.date); return date ? [{ date, slot: str(v.slot), start: str(v.start), end: str(v.end) }] : []; }) : [],
         nextAvailableDate: typeof d.nextAvailableDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.nextAvailableDate) ? d.nextAvailableDate : null,
@@ -118,6 +122,8 @@ export function restoreIntent(saved: unknown): BookingIntent {
         intent.paymentMethodId = str(data.paymentMethodId) ?? undefined;
         intent.cardResults = Object.fromEntries(Object.entries(obj(data.cardResults)).filter(([,v]) => typeof v === "string")) as Record<string, string>;
         intent.cardIssue = str(data.cardIssue) ?? undefined;
+        intent.rentalPayment = readRentalPaymentRecovery(data.rentalPayment, intent.attempts.dumpster?.acknowledgement?.rentalId ?? null);
+        if (data.rentalPayment !== undefined && !intent.rentalPayment) intent.blocked = true;
         intent.analyticsSent = data.analyticsSent === true;
     }
     return intent;
@@ -232,4 +238,17 @@ export function acceptedPriceLabel(a: BookingOutcome): string | null {
     if (p.subtotal == null || p.status !== "accepted") return null;
     const format = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
     return p.subtotalMax != null && p.subtotalMax > p.subtotal ? `${format(p.subtotal)} – ${format(p.subtotalMax)}` : format(p.subtotal);
+}
+
+/** Only an explicit approval check replays the exact frozen session. No new intent. */
+export async function refreshRentalApproval(intent: BookingIntent, send: (payload: Record<string, unknown>) => Promise<BookingEnvelope>, persist: () => boolean) {
+    const attempt = intent.attempts.dumpster;
+    if (intent.blocked || !intent.bookingSessionId || !attempt || !["pending_approval", "scheduled", "request_saved"].includes(attempt.acknowledgement?.outcome || "")) throw new Error("Use the authenticated customer portal to review this rental.");
+    if (!persist()) throw new Error(STORAGE_MESSAGE);
+    const response = await send(attempt.payload), outcome = readOutcome(response, "dumpster");
+    if (outcome.outcome === "uncertain") throw new Error("Rental approval could not be confirmed. Keep the original booking and check again.");
+    if (attempt.acknowledgement?.rentalId && outcome.rentalId !== attempt.acknowledgement.rentalId) throw new Error("The original rental could not be verified. Contact us.");
+    attempt.acknowledgement = outcome;
+    if (!persist()) throw new Error(STORAGE_MESSAGE);
+    return outcome;
 }
