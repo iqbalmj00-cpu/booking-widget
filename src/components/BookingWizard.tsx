@@ -1,5 +1,5 @@
 import { readRentalTerms, rentalDaysForSelection, rentalTermsLines, rentalQuoteBase, rentalQuoteSubtotal, rentalMoney, rentalInclusionLines } from "../lib/rentalPricing";
-import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, reopenTurnedAwayRental, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, refreshRentalApproval, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
+import { canReviseCapture, readWizardDraft, restoreIntent, saveIntent, hasAttempts, canResume, freezeAttempts, resumeIntent, reopenTurnedAwayRental, intentOutcomes, resolvedOutcome, readOutcome, acceptedPriceLabel, refreshRentalApproval, smsConsentText, setSmsConsent, STORAGE_MESSAGE, type ServiceLeg, type BookingEnvelope, type BookingOutcome } from "../lib/bookingIntent";
 import type { RentalPaymentCommand, RentalPaymentRecovery } from "../lib/bookingRentalPayment";
 import { parseBookingConfirmation } from "../lib/bookingConfirmation";
 import RentalBasePaymentPanel from "./booking/RentalBasePaymentPanel";
@@ -253,6 +253,8 @@ export default function BookingWizard({
 
     /* ── Terms state ── */
     const [termsAccepted, setTermsAccepted] = useState(saved?.termsAccepted ?? false);
+    /* ── SMS consent (optional, off until the visitor ticks it) ── */
+    const [smsOptIn, setSmsOptIn] = useState(saved?.smsOptIn === true);
 
     /* ── Dumpster rental state ── */
     const [serviceType, setServiceType] = useState<ServiceType | null>(allowedService(saved?.serviceType, mode));
@@ -317,14 +319,14 @@ export default function BookingWizard({
             selectedDate: selectedDate ? calendarDate(selectedDate) : null,
             leadId: intent.leadId, intent,
             selectedTime, contact, distanceSurcharge, distanceMiles, addressZip, leadCaptured,
-            termsAccepted, serviceType, containerSize, debrisType,
+            termsAccepted, smsOptIn, serviceType, containerSize, debrisType,
             rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
             addressConfirmed, addressVerified,
         };
         try { sessionStorage.setItem(storageKey, JSON.stringify(data)); } catch {}
     }, [step, tierIndex, edgeCases, volume, location,
         selectedDate, selectedTime, contact, distanceSurcharge, distanceMiles, addressZip, leadCaptured,
-        termsAccepted, serviceType, containerSize, debrisType,
+        termsAccepted, smsOptIn, serviceType, containerSize, debrisType,
         rentalDuration, promoCode, promoInputOpen, promoInputValue, paymentPreference,
         addressConfirmed, addressVerified, intent, storageKey]);
 
@@ -581,7 +583,11 @@ export default function BookingWizard({
     const serviceAddress = composeAddress(contact.address, contact.addressUnit);
 
     /* ── SMS consent text (shown verbatim to the customer) ─────────── */
-    const SMS_CONSENT_TEXT = "By proceeding to the next step you agree to marketing and booking related SMS and Email communications.";
+    // The host site supplies the Terms and Privacy pages. Without both there is
+    // nothing to link the consent to, so the widget does not ask for it.
+    const smsConsentOffered = !!(config.termsUrl && config.privacyUrl);
+    const SMS_CONSENT_LABEL = smsConsentText(config.companyName);
+    const consentText = smsConsentOffered && smsOptIn ? SMS_CONSENT_LABEL : null;
 
     /* ── Capture lead on Step 0 completion ─────────────────────────── */
     const captureLead = useCallback(async () => {
@@ -599,8 +605,6 @@ export default function BookingWizard({
                 address: serviceAddress,
                 description: contact.notes || "Widget booking started",
                 source: bookingSource,
-                smsOptIn: true,
-                consentText: SMS_CONSENT_TEXT,
                 metadata: {
                     customerType: contact.customerType,
                     ...(contact.addressUnit ? { addressUnit: contact.addressUnit } : {}),
@@ -608,6 +612,8 @@ export default function BookingWizard({
                 },
 
             };
+            // A reused capture keeps its contact fields, but consent is what the box says now.
+            setSmsConsent(intent.capture, consentText);
             // Persist uncertainty before sending, so reload cannot reuse an old refusal to edit an in-flight request.
             intent.captureAcknowledgement = readOutcome({ status: 0, data: null }, "junk");
             if (!persistIntent()) throw new Error(STORAGE_MESSAGE);
@@ -625,7 +631,7 @@ export default function BookingWizard({
         } finally {
             setSubmitting(false);
         }
-    }, [contact, serviceAddress, addressVerified, leadCaptured, SMS_CONSENT_TEXT, goNext, apiOpts, bookingSource, intent, persistIntent, rememberLead]);
+    }, [contact, serviceAddress, addressVerified, leadCaptured, consentText, goNext, apiOpts, bookingSource, intent, persistIntent, rememberLead]);
 
     useEffect(() => {
         if (allowedService(serviceType, mode) !== serviceType) {
@@ -737,8 +743,8 @@ export default function BookingWizard({
                     name: contact.name, phone: contact.phone, email: contact.email, address: serviceAddress,
                     description, requestedDate: selectedDate ? calendarDate(selectedDate) : undefined,
                     value: isOnSiteEstimate ? undefined : (minPrice || undefined), notes: contact.notes || "",
-                    smsOptIn: true,
-                    consentText: SMS_CONSENT_TEXT,
+                    smsOptIn: !!consentText,
+                    ...(consentText ? { consentText } : {}),
                     metadata: {
                         serviceType: "junk_removal",
                         customerType: contact.customerType,
@@ -792,8 +798,8 @@ export default function BookingWizard({
                     name: contact.name, phone: contact.phone, email: contact.email, address: serviceAddress,
                     description, requestedDate: selectedDate ? calendarDate(selectedDate) : undefined,
                     notes: contact.notes || "",
-                    smsOptIn: true,
-                    consentText: SMS_CONSENT_TEXT,
+                    smsOptIn: !!consentText,
+                    ...(consentText ? { consentText } : {}),
                     metadata: {
                         serviceType: "dumpster_rental",
                         customerType: contact.customerType,
@@ -1120,12 +1126,21 @@ export default function BookingWizard({
                             </div>
                         </div>
 
-                        {/* SMS + Email Disclosure */}
-                        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "14px 18px", borderRadius: 12, border: "1px solid var(--border, #E2E8F0)", background: "var(--card)", marginTop: 20 }}>
-                            <span style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>
-                                {SMS_CONSENT_TEXT}
-                            </span>
-                        </div>
+                        {/* SMS consent (optional — never part of canProceed) */}
+                        {smsConsentOffered && (
+                            <div style={{ padding: "14px 18px", borderRadius: 12, border: `1px solid ${smsOptIn ? "var(--brand)" : "var(--border, #E2E8F0)"}`, background: "var(--card)", marginTop: 20 }}>
+                                <label style={{ display: "flex", alignItems: "flex-start", gap: 12, cursor: "pointer" }}>
+                                    <input id={`${fieldId}-sms-consent`} type="checkbox" checked={smsOptIn} onChange={(e) => setSmsOptIn(e.target.checked)}
+                                        style={{ width: 20, height: 20, accentColor: "var(--brand)", flexShrink: 0, marginTop: 1 }} />
+                                    <span style={{ fontSize: 13, color: "var(--foreground)", lineHeight: 1.5 }}>
+                                        {SMS_CONSENT_LABEL}
+                                    </span>
+                                </label>
+                                <p style={{ fontSize: 13, lineHeight: 1.5, margin: "8px 0 0 32px" }}>
+                                    <a href={config.termsUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Terms of Service</a> · <a href={config.privacyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--brand)", fontWeight: 600 }}>Privacy Policy</a>
+                                </p>
+                            </div>
+                        )}
 
                         {error && (
                             <div style={{ marginTop: 16, padding: "12px 18px", borderRadius: 12, background: "#FEF2F2", border: "1px solid #FECACA", fontSize: 14, color: "#DC2626" }}>
