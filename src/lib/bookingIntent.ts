@@ -30,6 +30,20 @@ const instant = (v: unknown): string | null => typeof v === "string" && /T.*(?:Z
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 export const legs: ServiceLeg[] = ["junk", "dumpster"];
 
+/** SMS consent is the visitor's own tick on the contact step. `consentText` is the
+ * exact checkbox label, so the dashboard stores the words the customer agreed to. */
+const SMS_CONSENT_LEAD = "Text me about my quote and booking.";
+export const smsConsentText = (companyName: string) => `${SMS_CONSENT_LEAD} I agree to receive text messages from ${companyName} about my quote request and booking, including confirmations, reminders, crew updates, invoices, a follow-up about a quote I started, and a feedback request after my job. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not required to get a quote or book.`;
+export function setSmsConsent(payload: Record<string, unknown>, consentText: string | null) {
+    payload.smsOptIn = !!consentText;
+    if (consentText) payload.consentText = consentText; else delete payload.consentText;
+    return payload;
+}
+/** A payload saved before the checkbox existed says "yes" under the old blanket
+ * "marketing and booking" line. Replaying it would record consent nobody gave. */
+const dropLegacyConsent = (payload: Record<string, unknown>) => payload.smsOptIn === true
+    && !(typeof payload.consentText === "string" && payload.consentText.startsWith(SMS_CONSENT_LEAD)) ? setSmsConsent(payload, null) : payload;
+
 export function readOutcome(envelope: BookingEnvelope, service: ServiceLeg): BookingOutcome {
     const d = obj(envelope.data), p = obj(d.pricing), s = obj(d.schedule), r = obj(d.rental);
     const version = d.contractVersion === 2 ? 2 : null;
@@ -115,9 +129,9 @@ export function restoreIntent(saved: unknown): BookingIntent {
         for (const service of legs) {
             const a = obj(obj(data.attempts)[service]), payload = obj(a.payload);
             if (Object.keys(a).length && (!str(payload.name) || !str(payload.phone) || (session && payload.bookingSessionId !== session))) { intent.blocked = true; continue; }
-            if (Object.keys(payload).length) intent.attempts[service] = { payload, acknowledgement: readSavedOutcomes({ [service]: a.acknowledgement })[service] };
+            if (Object.keys(payload).length) intent.attempts[service] = { payload: dropLegacyConsent(payload), acknowledgement: readSavedOutcomes({ [service]: a.acknowledgement })[service] };
         }
-        if (Object.keys(obj(data.capture)).length) intent.capture = obj(data.capture);
+        if (Object.keys(obj(data.capture)).length) intent.capture = dropLegacyConsent(obj(data.capture));
         intent.captureAcknowledgement = readSavedOutcomes({ junk: data.captureAcknowledgement }).junk;
         intent.paymentMethodId = str(data.paymentMethodId) ?? undefined;
         intent.cardResults = Object.fromEntries(Object.entries(obj(data.cardResults)).filter(([,v]) => typeof v === "string")) as Record<string, string>;
